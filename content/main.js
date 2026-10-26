@@ -1,52 +1,199 @@
-// Frogbot: entry point, injected after frog.js and highlight.js each time
-// "Release the frog" is clicked.
+// Frogbot: entry point, injected after frog.js, highlight.js and extract.js each time
+// "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
 (() => {
   const Frogbot = window.Frogbot;
   const Highlight = window.FrogbotHighlight;
+  const Extract = window.FrogbotExtract;
 
   // Guard against double injection: one frog (and one run) at a time.
-  if (!Frogbot || !Highlight || Frogbot.isShowing()) return;
+  if (!Frogbot || !Highlight || !Extract || Frogbot.isShowing()) return;
 
-  const MAX_FALLBACK_TARGETS = 4;
-  const MIN_PARAGRAPH_CHARS = 80;
-  const EXCLUDED_AREAS =
-    "nav, header, footer, aside, [role='navigation'], [role='banner'], [role='contentinfo'], [role='complementary']";
+  const debug = window.__frogbotDebug === true;
+  const MAX_TARGETS = 4;
+  const MIN_TARGET_CHARS = 80;
+  const FROG_SIZE = 60;
+  const START_CLEARANCE = 10; // gap between the frog's bottom edge and the first block
+  const MAX_ABOVE_CONTAINER = 80; // how far above the main container the frog may start
+  const SEARCH_STEP = 20; // grid spacing when looking for a clear start spot
+  const SITE_HEADERS = "header, [role='banner']";
 
   let cancelled = false;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  function isVisible(el) {
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return false;
-    const style = getComputedStyle(el);
-    return style.visibility !== "hidden" && style.display !== "none";
+  function docRect(el) {
+    const r = el.getBoundingClientRect();
+    return {
+      left: r.left + scrollX,
+      top: r.top + scrollY,
+      right: r.right + scrollX,
+      bottom: r.bottom + scrollY,
+      width: r.width,
+      height: r.height,
+    };
   }
 
-  // Test pages mark targets explicitly. Elsewhere, fall back to the first few
-  // substantial paragraphs of the main content (temporary until extract.js exists).
-  function findTargets() {
+  const overlaps = (a, b) =>
+    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+  const frogRectAt = (spot) => ({
+    left: spot.x - FROG_SIZE / 2,
+    top: spot.y - FROG_SIZE / 2,
+    right: spot.x + FROG_SIZE / 2,
+    bottom: spot.y + FROG_SIZE / 2,
+  });
+
+  // Test pages mark targets explicitly. Elsewhere, the first few substantial
+  // paragraphs (temporary until scoring arrives in step 8).
+  function findTargets(blocks) {
     const marked = [...document.querySelectorAll("[data-frogbot-target]")];
     if (marked.length) {
       return marked.sort(
         (a, b) => Number(a.dataset.frogbotTarget) - Number(b.dataset.frogbotTarget)
       );
     }
-
-    const scope =
-      document.querySelector("main, [role='main'], article") || document.body;
-    return [...scope.querySelectorAll("p")]
+    return blocks
+      // Figcaptions are typed "paragraph" too, but image captions make poor targets.
       .filter(
-        (p) =>
-          !p.closest(EXCLUDED_AREAS) &&
-          p.textContent.replace(/\s+/g, " ").trim().length >= MIN_PARAGRAPH_CHARS &&
-          isVisible(p)
+        (b) =>
+          b.type === "paragraph" &&
+          b.element.tagName !== "FIGCAPTION" &&
+          b.text.length >= MIN_TARGET_CHARS
       )
-      .slice(0, MAX_FALLBACK_TARGETS);
+      .slice(0, MAX_TARGETS)
+      .map((b) => b.element);
   }
 
-  async function run() {
-    const targets = findTargets();
+  // ---- Start position ----
 
+  // Site headers: <header>/banner elements outside the article itself
+  // (Wikipedia's title bar is a <header> inside <main>, and that's fine to sit on).
+  function siteHeaderRects(container) {
+    return [...document.querySelectorAll(SITE_HEADERS)]
+      .filter((h) => !container.contains(h) && !h.closest("main, article, [role='main']"))
+      .map(docRect)
+      .filter((r) => r.width > 0 && r.height > 0);
+  }
+
+  // Does any visible text (not just extracted blocks) fall inside this document rect?
+  // Samples a grid of points with elementsFromPoint and measures the text nodes found.
+  // Only possible on screen; off-screen spots rely on the block check alone.
+  function coversText(rect) {
+    const view = {
+      left: rect.left - scrollX,
+      top: rect.top - scrollY,
+      right: rect.right - scrollX,
+      bottom: rect.bottom - scrollY,
+    };
+    const checked = new Set();
+    const range = document.createRange();
+    for (const fx of [0.1, 0.5, 0.9]) {
+      for (const fy of [0.1, 0.5, 0.9]) {
+        const x = view.left + (view.right - view.left) * fx;
+        const y = view.top + (view.bottom - view.top) * fy;
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+        for (const el of document.elementsFromPoint(x, y)) {
+          if (checked.has(el) || el === document.body || el === document.documentElement) continue;
+          checked.add(el);
+          for (const node of el.childNodes) {
+            if (node.nodeType !== Node.TEXT_NODE || !node.data.trim()) continue;
+            range.selectNodeContents(node);
+            for (const r of range.getClientRects()) {
+              if (r.width > 0 && overlaps(r, view)) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  // The frog should never start on top of text or the site header.
+  // 1. Bottom edge START_CLEARANCE above the first block, centred on the main container
+  //    (allowed up to MAX_ABOVE_CONTAINER above the container).
+  // 2. Otherwise just left of the first block, using the same rules as hopping.
+  // 3. Otherwise the nearest clear spot to (1) above or left of the first block.
+  function startPosition(container, blocks) {
+    if (!blocks.length) return undefined;
+    const box = docRect(container);
+    const first = docRect(blocks[0].element);
+    const headers = siteHeaderRects(container);
+    const blockRects = blocks.map((b) => docRect(b.element));
+    const highestTop = Math.max(box.top - MAX_ABOVE_CONTAINER, 0);
+    const lowestY = first.top - START_CLEARANCE - FROG_SIZE / 2;
+
+    const isClear = (spot) => {
+      const rect = frogRectAt(spot);
+      return (
+        rect.top >= 0 &&
+        rect.left >= 0 &&
+        !headers.some((h) => overlaps(rect, h)) &&
+        !blockRects.some((b) => overlaps(rect, b)) &&
+        !coversText(rect)
+      );
+    };
+
+    const above = { x: box.left + box.width / 2, y: lowestY };
+    const aboveAllowed = above.y - FROG_SIZE / 2 >= highestTop;
+    if (aboveAllowed && isClear(above)) return above;
+
+    const left = Frogbot.landingSpotFor(blocks[0].element);
+    const leftIsBeside = left.x < first.left;
+    if (leftIsBeside && isClear(left)) return left;
+
+    // Search: a grid across the container above the first block, plus a row
+    // stretching left of it, nearest to the preferred spot first.
+    const spots = [];
+    for (let y = lowestY; y - FROG_SIZE / 2 >= highestTop; y -= SEARCH_STEP / 2) {
+      for (let x = box.left + FROG_SIZE / 2; x <= box.right - FROG_SIZE / 2; x += SEARCH_STEP) {
+        spots.push({ x, y });
+      }
+    }
+    for (let x = first.left - FROG_SIZE / 2 - 30; x >= FROG_SIZE / 2; x -= SEARCH_STEP) {
+      spots.push({ x, y: first.top + Math.min(first.height, FROG_SIZE) / 2 });
+    }
+    const distance = (s) => Math.hypot(s.x - above.x, s.y - above.y);
+    spots.sort((a, b) => distance(a) - distance(b));
+    const clear = spots.find(isClear);
+    if (clear) return clear;
+
+    // Nothing is clear: prefer the spec'd spots anyway, header permitting.
+    if (aboveAllowed && !headers.some((h) => overlaps(frogRectAt(above), h))) return above;
+    return leftIsBeside ? left : above;
+  }
+
+  function addDebugBox(el, className, label) {
+    const rect = docRect(el);
+    const box = document.createElement("div");
+    box.className = `frogbot-debug-box ${className}`;
+    box.setAttribute("data-frogbot", "");
+    box.setAttribute("aria-hidden", "true");
+    box.style.translate = `${rect.left}px ${rect.top}px`;
+    box.style.width = `${rect.width}px`;
+    box.style.height = `${rect.height}px`;
+    if (label) {
+      const tag = document.createElement("span");
+      tag.className = "frogbot-debug-label";
+      tag.textContent = label;
+      box.appendChild(tag);
+    }
+    document.documentElement.appendChild(box);
+  }
+
+  function showDebug(container, blocks, ms) {
+    addDebugBox(container, "frogbot-debug-container", "main container");
+    for (const b of blocks) addDebugBox(b.element, `frogbot-debug-${b.type}`, `${b.index} ${b.type}`);
+    console.table(
+      blocks.map((b) => ({
+        index: b.index,
+        type: b.type,
+        text: b.text.slice(0, 60),
+        chars: b.text.length,
+      }))
+    );
+    console.log(`Frogbot: extracted ${blocks.length} blocks in ${ms.toFixed(1)} ms`, container);
+  }
+
+  async function run(targets) {
     if (!targets.length) {
       Frogbot.say("Nothing to catch here");
       await sleep(3000);
@@ -73,17 +220,25 @@
   }
 
   console.log("Frogbot here");
-  Frogbot.show();
+
+  const started = performance.now();
+  const container = Extract.findMainContainer();
+  const blocks = Extract.getBlocks(container);
+  const extractMs = performance.now() - started;
+
+  Frogbot.show(startPosition(container, blocks));
+  if (debug) showDebug(container, blocks, extractMs);
 
   document.addEventListener("keydown", onKeyDown, true);
-  // Runs on any remove(), so nothing outlives the frog.
+  // Runs on any remove(), so nothing outlives the frog. Debug boxes are
+  // data-frogbot elements, so remove() clears them along with the frog.
   Frogbot.onRemove(() => {
     cancelled = true;
     document.removeEventListener("keydown", onKeyDown, true);
     Highlight.clearAll();
   });
 
-  run().catch((error) => {
+  run(blocks.length ? findTargets(blocks) : []).catch((error) => {
     // Removing the frog mid-animation rejects with AbortError; that's expected.
     if (!cancelled && error.name !== "AbortError") console.error("Frogbot:", error);
   });

@@ -24,6 +24,18 @@ After you change any file, click the reload icon on Frogbot's card in `chrome://
    its tongue at each one to highlight it. Press **Escape** at any point to remove the frog and
    all highlights.
 
+### Debug view: "Show what Frogbot reads"
+
+Tick **Show what Frogbot reads** in the popup before releasing the frog (the setting is
+remembered). Frogbot then outlines everything it extracted from the page:
+
+- the chosen main content container in solid red
+- every text block in a dashed outline coloured by type, with a small `index type` label:
+  paragraph grey, list green, table blue, heading purple, quote orange
+
+It also logs a `console.table` of the blocks (index, type, first 60 characters, length) and the
+extraction time to the page's DevTools console. Escape clears the outlines with the frog.
+
 The sample page is a fictional earnings release for "Lilypad Holdings". It contains real-looking
 financial figures plus junk numbers (phone numbers, a street address, a page number, footnote
 markers, a copyright year) for the future scorer to ignore.
@@ -34,14 +46,26 @@ markers, a copyright year) for the future scorer to ignore.
 manifest.json        MV3 manifest (activeTab + scripting only)
 popup/               The toolbar popup with the "Release the frog" button
 content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show()/remove()
-content/main.js      Entry point injected on click: finds targets, runs the hop sequence
+content/main.js      Entry point injected on click: extracts, picks targets, runs the hops
 content/frogbot.css  Frog styles (all classes prefixed frogbot-)
-content/extract.js   Placeholder: number extraction
+content/extract.js   window.FrogbotExtract: main-content detection and text blocks
 content/score.js     Placeholder: number scoring
 content/highlight.js window.FrogbotHighlight: mark() and clearAll()
 assets/frog.svg      Reference copy of the frog artwork
 test-pages/          Local pages for testing
+tools/               Developer scripts (not part of the extension)
 ```
+
+## Editing the frog artwork
+
+`assets/frog.svg` is the source of truth for the frog. `content/frog.js` holds a copy of it
+between the `// FROG_SVG_START` and `// FROG_SVG_END` comments, so the legs can be animated
+with CSS. After editing the SVG:
+
+1. Run `python tools/sync_frog_svg.py` (Python 3, no extra packages).
+2. Reload Frogbot in `chrome://extensions`.
+
+Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles them.
 
 ## Roadmap
 
@@ -49,6 +73,8 @@ test-pages/          Local pages for testing
   - Steps 1–3: skeleton, test page and a static frog injected on click (done)
   - Steps 4–5: hopping between fixed targets with leg animation, and a tongue flick that
     highlights each target (done)
+  - Step 6: reading the page with `extract.js`, which finds the main content and splits it
+    into paragraph, list, table, heading and quote blocks, plus the debug view (done)
 - **Milestone 2: Find the numbers.** Extract numbers from the article text and score them by
   importance, ignoring junk such as phone numbers, dates in boilerplate and page numbers.
 - **Milestone 3: Tongue highlights.** The frog hops to each important number and highlights it

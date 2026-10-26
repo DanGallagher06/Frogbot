@@ -24,6 +24,7 @@
 
   // Same artwork as assets/frog.svg, inlined so the legs can be animated with CSS
   // and no web_accessible_resources are needed. Faces down the page.
+  // FROG_SVG_START: generated from assets/frog.svg by tools/sync_frog_svg.py; don't edit by hand.
   const FROG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" focusable="false">
       <g class="frogbot-leg frogbot-leg-back-left" id="frogbot-leg-back-left" fill="#43a047" stroke="#2e6b2f" stroke-width="1.5">
         <ellipse cx="74" cy="27" rx="7" ry="15" transform="rotate(30 74 27)"/>
@@ -69,6 +70,7 @@
         <circle cx="60" cy="74.3" r="1.1" fill="#ffffff"/>
       </g>
     </svg>`;
+  // FROG_SVG_END
 
   let frogEl = null;
   let cleanups = [];
@@ -180,15 +182,17 @@
       return Boolean(frogEl && frogEl.isConnected);
     },
 
-    show() {
+    // Shows the frog centred on `at` ({x, y} in document coordinates), or at the
+    // top centre of the page if no position is given.
+    show(at) {
       if (this.isShowing()) return frogEl;
 
       generation += 1;
       frogEl = addFrogbotElement("frogbot-frog");
       frogEl.innerHTML = FROG_SVG;
 
-      state.x = window.scrollX + document.documentElement.clientWidth / 2;
-      state.y = TOP_MARGIN + FROG_SIZE / 2;
+      state.x = at ? at.x : window.scrollX + document.documentElement.clientWidth / 2;
+      state.y = at ? Math.max(at.y, FROG_SIZE / 2) : TOP_MARGIN + FROG_SIZE / 2;
       state.angle = 0;
       frogEl.style.translate = translateFor(state.x, state.y);
       frogEl.style.rotate = "0deg";
@@ -315,6 +319,11 @@
       const x = state.x - bubble.offsetWidth / 2;
       bubble.style.translate = `${x}px ${state.y + FROG_SIZE / 2 + 10}px`;
       return bubble;
+    },
+
+    // Where hopTo() would land next to an element (centre point, document coordinates).
+    landingSpotFor(element) {
+      return landingSpotFor(element);
     },
 
     // Register teardown work (e.g. event listeners) to run on remove().
