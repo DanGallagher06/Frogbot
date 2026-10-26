@@ -34,7 +34,9 @@ remembered). Frogbot then outlines everything it extracted from the page:
   paragraph grey, list green, table blue, heading purple, quote orange
 
 It also logs a `console.table` of the blocks (index, type, first 60 characters, length) and the
-extraction time to the page's DevTools console. Escape clears the outlines with the frog.
+extraction time to the page's DevTools console, followed by a table of the numbers found on
+the page by type (plus how many were junk, like phone numbers and footnote markers) and how
+long detection took. Escape clears the outlines with the frog.
 
 The sample page is a fictional earnings release for "Lilypad Holdings". It contains real-looking
 financial figures plus junk numbers (phone numbers, a street address, a page number, footnote
@@ -49,12 +51,29 @@ content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show(
 content/main.js      Entry point injected on click: extracts, picks targets, runs the hops
 content/frogbot.css  Frog styles (all classes prefixed frogbot-)
 content/extract.js   window.FrogbotExtract: main-content detection and text blocks
-content/score.js     Placeholder: number scoring
+content/score.js     window.FrogbotScore: sentence splitting and number detection
 content/highlight.js window.FrogbotHighlight: mark() and clearAll()
 assets/frog.svg      Reference copy of the frog artwork
 test-pages/          Local pages for testing
+tests/               Number-detection test cases and the browser test runner
 tools/               Developer scripts (not part of the extension)
 ```
+
+## Running the tests
+
+`content/score.js` is plain string code with no page access, so it is tested on its own
+against the cases in `tests/detect-cases.js` (number detection and sentence splitting).
+
+- **In the browser:** open `tests/run-tests.html` straight from the file system in Edge or
+  Chrome. It shows a summary, accuracy for each number type, and a row per case; failed
+  rows show what was expected and what was found. Reload after editing the code or cases.
+- **From the command line:** `python tools/run_tests.py` runs the same page in headless
+  Edge or Chrome and prints the summary and any failures (exit status 1 if anything fails).
+  Set `FROGBOT_BROWSER` to a browser executable if it isn't found automatically.
+
+To add a case, copy one in `tests/detect-cases.js`: give the text, where it came from, and
+the numbers you expect. Only the fields you list are checked, but every number found must
+be expected.
 
 ## Editing the frog artwork
 
@@ -75,6 +94,9 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
     highlights each target (done)
   - Step 6: reading the page with `extract.js`, which finds the main content and splits it
     into paragraph, list, table, heading and quote blocks, plus the debug view (done)
+  - Step 7: number detection in `score.js`: every number in a text with its type (money,
+    percent, basis points, per share, multiple, period, date, year, count), value, currency,
+    scale, ranges and negatives, with junk like phone numbers flagged, plus a test suite (done)
 - **Milestone 2: Find the numbers.** Extract numbers from the article text and score them by
   importance, ignoring junk such as phone numbers, dates in boilerplate and page numbers.
 - **Milestone 3: Tongue highlights.** The frog hops to each important number and highlights it

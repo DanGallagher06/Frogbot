@@ -21,6 +21,7 @@
   const TONGUE_MAX_MS = 250;
   const SCROLL_SETTLE_MS = 100;
   const SCROLL_MAX_MS = 1500;
+  const SCROLL_START_GRACE_MS = 600;
 
   // Same artwork as assets/frog.svg, inlined so the legs can be animated with CSS
   // and no web_accessible_resources are needed. Faces down the page.
@@ -129,9 +130,12 @@
   }
 
   // Resolves once scrolling has stopped for SCROLL_SETTLE_MS, or after SCROLL_MAX_MS.
-  function waitForScrollToSettle(gen) {
+  // With `targetY`, it also waits for the scroll to start: on a busy page a smooth scroll
+  // can begin well after it was requested, which would otherwise look "settled".
+  function waitForScrollToSettle(gen, targetY) {
     return new Promise((resolve) => {
       const start = performance.now();
+      const startY = window.scrollY;
       let lastX = window.scrollX;
       let lastY = window.scrollY;
       let lastChange = start;
@@ -142,7 +146,12 @@
           lastY = window.scrollY;
           lastChange = now;
         }
-        const settled = now - lastChange >= SCROLL_SETTLE_MS;
+        const started =
+          targetY === undefined ||
+          window.scrollY !== startY ||
+          Math.abs(window.scrollY - targetY) < 2 ||
+          now - start >= SCROLL_START_GRACE_MS; // the page may refuse to scroll
+        const settled = started && now - lastChange >= SCROLL_SETTLE_MS;
         if (settled || now - start >= SCROLL_MAX_MS || gen !== generation) {
           resolve();
         } else {
@@ -198,6 +207,35 @@
       frogEl.style.rotate = "0deg";
 
       return frogEl;
+    },
+
+    // If the frog is outside the window, smoothly scroll it into view; resolves once
+    // the scroll has settled.
+    async bringIntoView() {
+      const gen = generation;
+      checkAlive(gen);
+      const r = frogEl.getBoundingClientRect();
+      const fitsX = r.left >= 0 && r.right <= innerWidth;
+      if (r.top >= 0 && r.bottom <= innerHeight && fitsX) return;
+      // scrollIntoView() ignores the translate property the frog is placed with,
+      // so scroll to its document coordinates directly.
+      const maxY = document.documentElement.scrollHeight - innerHeight;
+      const top = Math.min(Math.max(0, state.y - innerHeight / 2), Math.max(0, maxY));
+      window.scrollTo({
+        top,
+        left: fitsX ? scrollX : Math.max(0, state.x - innerWidth / 2),
+        behavior: reducedMotion() ? "auto" : "smooth",
+      });
+      await waitForScrollToSettle(gen, top);
+      checkAlive(gen);
+    },
+
+    // Moves the frog straight to a spot (no hop), e.g. when the page shifts under it.
+    placeAt(spot) {
+      checkAlive(generation);
+      state.x = spot.x;
+      state.y = spot.y;
+      frogEl.style.translate = translateFor(state.x, state.y);
     },
 
     // Rotate to face a document coordinate, taking the shortest way round.

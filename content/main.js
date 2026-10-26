@@ -1,12 +1,13 @@
-// Frogbot: entry point, injected after frog.js, highlight.js and extract.js each time
+// Frogbot: entry point, injected after frog.js, highlight.js, extract.js and score.js each time
 // "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
 (() => {
   const Frogbot = window.Frogbot;
   const Highlight = window.FrogbotHighlight;
   const Extract = window.FrogbotExtract;
+  const Score = window.FrogbotScore;
 
   // Guard against double injection: one frog (and one run) at a time.
-  if (!Frogbot || !Highlight || !Extract || Frogbot.isShowing()) return;
+  if (!Frogbot || !Highlight || !Extract || !Score || Frogbot.isShowing()) return;
 
   const debug = window.__frogbotDebug === true;
   const MAX_TARGETS = 4;
@@ -191,9 +192,40 @@
       }))
     );
     console.log(`Frogbot: extracted ${blocks.length} blocks in ${ms.toFixed(1)} ms`, container);
+    logNumbers(blocks);
+  }
+
+  // Debug only: what detectNumbers finds across the page (no visual changes yet).
+  function logNumbers(blocks) {
+    const started = performance.now();
+    const counts = {};
+    let junk = 0;
+    let total = 0;
+    for (const block of blocks) {
+      for (const match of Score.detectNumbers(block.text)) {
+        total += 1;
+        if (match.junk) {
+          junk += 1;
+          continue;
+        }
+        counts[match.type] = (counts[match.type] || 0) + 1;
+      }
+    }
+    const ms = performance.now() - started;
+    const rows = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, count]) => ({ type, count }));
+    rows.push({ type: "junk", count: junk });
+    console.table(rows);
+    console.log(`Frogbot: found ${total} numbers (${junk} junk) in ${blocks.length} blocks in ${ms.toFixed(1)} ms`);
   }
 
   async function run(targets) {
+    await Frogbot.bringIntoView();
+    // Scrolling can shift the page (lazy-loaded images, collapsing banners), so check
+    // the start spot again now that the page is still, and nudge the frog if it moved.
+    const settled = startPosition(container, blocks);
+    if (settled) Frogbot.placeAt(settled);
     if (!targets.length) {
       Frogbot.say("Nothing to catch here");
       await sleep(3000);

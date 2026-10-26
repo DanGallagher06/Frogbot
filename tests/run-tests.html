@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frogbot Number Tests</title>
+  <style>
+    :root {
+      --bg: #f6f8f5; --panel: #ffffff; --text: #1d2a1c; --muted: #5d6b5c; --line: #dfe6dd;
+      --pass: #2e7d32; --pass-bg: #e8f5e9; --fail: #b3261e; --fail-bg: #fdecea; --code: #f1f4f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141a14; --panel: #1c241c; --text: #e3ebe2; --muted: #9aa999; --line: #2f3a2f;
+        --pass: #81c784; --pass-bg: #1d3320; --fail: #ef9a9a; --fail-bg: #3a1e1c; --code: #243024;
+      }
+    }
+    body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 17px; margin: 32px 0 8px; }
+    .muted { color: var(--muted); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .card .big { font-size: 24px; font-weight: 700; }
+    .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+    th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr.fail td { background: var(--fail-bg); }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge.pass { color: var(--pass); background: var(--pass-bg); }
+    .badge.fail { color: var(--fail); background: var(--fail-bg); }
+    code, .chip { font: 12px/1.4 ui-monospace, Consolas, monospace; background: var(--code); border-radius: 4px; padding: 1px 4px; }
+    .chip { display: inline-block; margin: 1px 2px; }
+    .problems { color: var(--fail); font-size: 12px; margin: 4px 0 0; padding-left: 16px; }
+    label { user-select: none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Frogbot number detection tests</h1>
+  <p class="muted">Runs <code>content/score.js</code> against <code>tests/detect-cases.js</code>. Reload the page after editing either file.</p>
+  <section class="cards" id="summary"></section>
+
+  <h2>Accuracy by type</h2>
+  <div class="table-wrap"><table id="types"></table></div>
+
+  <h2>Detection cases</h2>
+  <p><label><input type="checkbox" id="only-failures"> Show failures only</label></p>
+  <div class="table-wrap"><table id="detect"></table></div>
+
+  <h2>Sentence splitting</h2>
+  <div class="table-wrap"><table id="split"></table></div>
+</main>
+
+<!-- Machine-readable results for tools/run_tests.py. -->
+<pre id="results-json" hidden></pre>
+
+<script src="../content/score.js"></script>
+<script src="detect-cases.js"></script>
+<script src="harness.js"></script>
+<script>
+  const results = FrogbotTestHarness.runTests(FrogbotScore, FrogbotTestCases);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const pct = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : "–");
+  const chip = (m) => `<span class="chip">${esc(m.raw)} · ${esc(m.junk ? "junk:" + m.junkReason : m.type)}${m.value !== null && m.value !== undefined && !m.junk ? " = " + esc(m.value) : ""}</span>`;
+  const s = results.summary;
+
+  const realLine = Object.entries(results.real).map(([t, r]) => `${t} ${pct(r.correct, r.expected)}`).join(" · ");
+  document.getElementById("summary").innerHTML = [
+    ["Overall accuracy", `${s.accuracy}%`, `${s.passed} of ${s.total} cases pass`],
+    ["Detection", `${s.detectPassed}/${s.detectTotal}`, pct(s.detectPassed, s.detectTotal)],
+    ["Sentence splitting", `${s.splitPassed}/${s.splitTotal}`, pct(s.splitPassed, s.splitTotal)],
+    ["Failed", s.failed, `ran in ${s.ms} ms`],
+    ["Real releases", "", realLine || "–"],
+  ].map(([label, big, sub]) => `<div class="card"><div class="muted">${label}</div><div class="big">${big}</div><div class="muted">${sub}</div></div>`).join("");
+
+  document.getElementById("types").innerHTML =
+    `<tr><th>Type</th><th class="num">Expected</th><th class="num">Correct</th><th class="num">Accuracy</th><th class="num">Unexpected extras</th></tr>` +
+    Object.entries(results.perType).sort(([a], [b]) => a.localeCompare(b)).map(([type, r]) =>
+      `<tr${r.correct < r.expected ? ' class="fail"' : ""}><td><code>${esc(type)}</code></td><td class="num">${r.expected}</td><td class="num">${r.correct}</td><td class="num">${pct(r.correct, r.expected)}</td><td class="num">${r.falsePositives}</td></tr>`
+    ).join("");
+
+  function renderDetect(onlyFailures) {
+    document.getElementById("detect").innerHTML =
+      `<tr><th>#</th><th>Result</th><th>Source</th><th>Text</th><th>Expected</th><th>Actual</th></tr>` +
+      results.detect.map((r, i) => (onlyFailures && r.pass) ? "" :
+        `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td>
+          <td><span class="badge ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span></td>
+          <td>${esc(r.source)}</td>
+          <td>${esc(r.text)}${r.pass ? "" : `<ul class="problems">${r.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`}</td>
+          <td>${r.expected.map(chip).join("") || '<span class="muted">none</span>'}</td>
+          <td>${r.actual.map(chip).join("") || '<span class="muted">none</span>'}</td></tr>`
+      ).join("");
+  }
+  renderDetect(false);
+  document.getElementById("only-failures").addEventListener("change", (e) => renderDetect(e.target.checked));
+
+  document.getElementById("split").innerHTML =
+    `<tr><th>#</th><th>Result</th><th>Text</th><th>Expected</th><th>Actual</th></tr>` +
+    results.split.map((r, i) =>
+      `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td>
+        <td><span class="badge ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span></td>
+        <td>${esc(r.text) || '<span class="muted">(empty)</span>'}</td>
+        <td>${r.expected.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td>
+        <td>${r.actual.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td></tr>`
+    ).join("");
+
+  document.getElementById("results-json").textContent = JSON.stringify({
+    summary: results.summary,
+    perType: results.perType,
+    real: results.real,
+    failures: [
+      ...results.detect.filter((r) => !r.pass).map((r) => ({ kind: "detect", source: r.source, text: r.text, problems: r.problems })),
+      ...results.split.filter((r) => !r.pass).map((r) => ({ kind: "split", text: r.text, expected: r.expected, actual: r.actual, problems: r.problems })),
+    ],
+  });
+</script>
+</body>
+</html>
