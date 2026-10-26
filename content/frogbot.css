@@ -1,0 +1,41 @@
+/* Frogbot styles. Every class is prefixed frogbot- and box properties are set
+   explicitly so host-page CSS can't easily distort the frog. */
+
+.frogbot-frog {
+  all: initial !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 2147483000 !important;
+  width: 60px !important;
+  height: 60px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  box-sizing: content-box !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  filter: none !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.frogbot-frog svg {
+  display: block !important;
+  width: 60px !important;
+  height: 60px !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+}
