@@ -19,7 +19,7 @@ releaseButton.addEventListener("click", async () => {
     await chrome.scripting.insertCSS({ target, files: ["content/frogbot.css"] });
     await chrome.scripting.executeScript({
       target,
-      files: ["content/frog.js", "content/main.js"],
+      files: ["content/frog.js", "content/highlight.js", "content/main.js"],
     });
 
     window.close();
