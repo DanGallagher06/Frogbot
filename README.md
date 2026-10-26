@@ -42,6 +42,11 @@ The sample page is a fictional earnings release for "Lilypad Holdings". It conta
 financial figures plus junk numbers (phone numbers, a street address, a page number, footnote
 markers, a copyright year) for the future scorer to ignore.
 
+`test-pages/captions-and-collapsed.html` is a news-style article for checking what extraction
+skips: photo captions and credits without `<figcaption>`, a key-points box, a collapsed AI
+summary, a closed `<details>` and a squashed hidden box. Each block is marked
+`data-expect="keep"` or `"skip"`; tick **Show what Frogbot reads** to compare.
+
 ## Project layout
 
 ```
@@ -62,18 +67,47 @@ tools/               Developer scripts (not part of the extension)
 ## Running the tests
 
 `content/score.js` is plain string code with no page access, so it is tested on its own
-against the cases in `tests/detect-cases.js` (number detection and sentence splitting).
+against the cases in `tests/detect-cases.js` and `tests/holdout-cases.js` (number detection
+and sentence splitting; see "Measuring accuracy honestly" below).
 
 - **In the browser:** open `tests/run-tests.html` straight from the file system in Edge or
   Chrome. It shows a summary, accuracy for each number type, and a row per case; failed
   rows show what was expected and what was found. Reload after editing the code or cases.
 - **From the command line:** `python tools/run_tests.py` runs the same page in headless
-  Edge or Chrome and prints the summary and any failures (exit status 1 if anything fails).
+  Edge or Chrome and prints the summary and any failures for each set (exit status 1 if
+  anything fails).
   Set `FROGBOT_BROWSER` to a browser executable if it isn't found automatically.
 
 To add a case, copy one in `tests/detect-cases.js`: give the text, where it came from, and
 the numbers you expect. Only the fields you list are checked, but every number found must
 be expected.
+
+## Measuring accuracy honestly
+
+There are two sets of test cases, and the runner reports them separately:
+
+- **Development set** (`tests/detect-cases.js`): the cases `score.js` was built and fixed
+  against. Every time a bug turns up, a case for it goes here and the code is changed until
+  it passes. That makes this set's accuracy close to 100% by construction, so it shows that
+  known problems stay fixed, not how well detection works on pages it hasn't seen.
+- **Held-out set** (`tests/holdout-cases.js`): cases written by hand from pages that were
+  never used in development, and never used as a reason to change the code. Its accuracy is
+  the honest estimate of how Frogbot does on a new article.
+
+To add held-out cases:
+
+1. Pick a page that hasn't been used for development (not the test pages, the Wikipedia
+   Nvidia article, the BBC data centre article, or the Nvidia and Apple releases used so far).
+2. Copy sentences or table cells into `tests/holdout-cases.js` in the same format as the
+   development cases, with the page's URL as `source`, and write down the numbers you expect
+   *before* running the tests.
+3. Run the tests and record the held-out accuracy. If a case fails, don't change the code to
+   fix that case. Write a new development case that shows the same problem, fix against that,
+   and leave the held-out case untouched. Then add fresh held-out cases from another new page
+   from time to time, since the old ones slowly stop being "unseen".
+
+The three entries already in `holdout-cases.js` are format examples marked `example: true`;
+the runner skips them, so it reports "No held-out cases yet" until real ones are added.
 
 ## Editing the frog artwork
 

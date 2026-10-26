@@ -37,6 +37,16 @@
     String.raw`Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\.?`;
   const TIMEZONE = String.raw`(?:\s?(?:ET|EST|EDT|CT|CST|CDT|MT|PT|PST|PDT|GMT|BST|UTC|CET|CEST)\b)?`;
 
+  // What a "times" multiple is measured against: "3 times earnings", "12 times forward EBITDA".
+  const VALUATION_BASIS =
+    String.raw`(?:(?:forward|trailing|next[- ]year'?s?|annual|adjusted|projected|expected)\s+)?` +
+    String.raw`(?:earnings|sales|revenues?|EBITDA|EBIT|book(?:\s+value)?|cash\s+flow|free\s+cash\s+flow|profits?|net\s+income|income|P\/E)\b`;
+
+  // Video resolutions that look like pence ("1080p"), and money words that make "240p" pence.
+  const RESOLUTIONS = new Set(["144", "360", "480", "576", "720", "1080", "1440", "2160", "4320"]);
+  const PENCE_CONTEXT =
+    /\b(?:shares?|stock|price|priced|dividend|pence|penny|rose|fell|gained|lost|dropped|climbed|jumped|slid|up|down|at|to|from|worth|cost|costs|paid|pay|pays|raised|cut)\b/i;
+
   const MULTIPLIER = { thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
   function scaleOf(raw) {
     if (!raw) return null;
@@ -67,6 +77,7 @@
       high: null,
       junk: false,
       junkReason: null,
+      decade: false,
       ...fields,
     };
   }
@@ -213,6 +224,32 @@
 
     // ---- Periods (before model names, so "FY26", "Q3" and "H1" aren't junk) ----
     {
+      // Quarter and half ranges: "Q1-Q3 2026", "Q1–Q3", "H1-H2". low/high are the quarter
+      // or half numbers; value is the year when given.
+      when: /[QH][1-4]\s?[-–—]\s?[QH]/,
+      re: /\b(?<p>[QH])(?<a>[1-4])\s?[-–—]\s?\k<p>(?<b>[1-4])(?!\d)(?:\s?(?:FY\s?'?(?<y2>\d{2}|\d{4})|'(?<y3>\d{2})|(?:[Ff]iscal\s+)?(?<y4>\d{4})))?(?![\dA-Za-z])/g,
+      build: (m, t) => {
+        const { p, a, b } = m.groups;
+        if (p === "H" && (Number(a) > 2 || Number(b) > 2)) return null;
+        return makeMatch(t, m.index, m.index + m[0].length, "period", {
+          low: Number(a),
+          high: Number(b),
+          value: yearFrom(m.groups.y2 || m.groups.y3 || m.groups.y4),
+        });
+      },
+    },
+    {
+      // Decades: "1990s", "the '90s". value is the decade's first year.
+      when: /\d0s\b/,
+      re: /\b(?<full>(?:1[89]|20)\d0)s\b|(?<![\w'’])['’](?<short>\d)0s\b/g,
+      build: (m, t) => {
+        const { full, short } = m.groups;
+        const decadeOf = (d) => (Number(d) >= 3 ? 1900 : 2000) + Number(d) * 10;
+        const value = full ? Number(full) : decadeOf(short);
+        return makeMatch(t, m.index, m.index + m[0].length, "period", { value, decade: true });
+      },
+    },
+    {
       re: /\bQ(?<q>[1-4])(?!\d)(?:\s?(?:FY\s?'?(?<y2>\d{2}|\d{4})|'(?<y3>\d{2})|(?:[Ff]iscal\s+)?(?<y4>\d{4})))?(?!\d)|\b[1-4]Q\s?'?(?<y5>\d{2}|\d{4})?\b/g,
       when: /Q[1-4]|[1-4]Q/,
       build: (m, t) =>
@@ -297,6 +334,18 @@
 
     // ---- Money ----
     {
+      // In tables, any bracketed amount is negative: "($1.2 million)". In prose those
+      // brackets are often just an aside, so this only runs with { inTable: true }.
+      tableOnly: true,
+      when: /\([$£€¥₹]/,
+      re: new RegExp(String.raw`\((?<cur>${CURRENCY_PREFIX})(?<bn>${NUM})${NUM_END}(?<scale>${SCALE})\)`, "g"),
+      build: (m, t) =>
+        makeMatch(t, m.index, m.index + m[0].length, "money", {
+          ...amountFields(m.groups),
+          currency: currencyCode(m.groups.cur),
+        }),
+    },
+    {
       // Tight accounting brackets around currency: "($1.2)".
       re: new RegExp(String.raw`\((?<cur>${CURRENCY_PREFIX})(?<bn>${NUM})${NUM_END}\)`, "g"),
       when: /[$£€¥₹]/,
@@ -313,7 +362,7 @@
           String.raw`(?:\((?<bn>${NUM})${NUM_END}\)|(?<n1>${NUM})${NUM_END})` +
           String.raw`(?:${DASH}(?<n2>${NUM})${NUM_END}${NOT_PERCENT})?` +
           String.raw`(?<scale>${SCALE})?` +
-          String.raw`(?<per>\s+per\s+(?:diluted\s+|basic\s+)?(?:common\s+|ordinary\s+)?share)?`,
+          String.raw`(?<per>\s+(?:per|a)\s+(?:diluted\s+|basic\s+)?(?:common\s+|ordinary\s+)?share\b)?`,
         "g"
       ),
       build: (m, t) =>
@@ -335,6 +384,25 @@
           ...amountFields(m.groups),
           currency: currencyCode(m.groups.cur),
         }),
+    },
+
+    // ---- Pence: "240p", "15.5p" (value in pounds). Video resolutions aren't money. ----
+    {
+      when: /\dp\b/,
+      re: new RegExp(String.raw`(?<![\w.,$£€])(?<n1>${NUM})${NUM_END}p\b`, "g"),
+      build: (m, t) => {
+        const raw = m.groups.n1;
+        if (RESOLUTIONS.has(raw)) return junkMatch(t, m.index, m.index + m[0].length, "resolution");
+        // Whole-number pence need a money word nearby ("shares fell to 240p"); decimals don't.
+        const lead = t.slice(Math.max(0, m.index - 60), m.index);
+        if (!raw.includes(".") && !PENCE_CONTEXT.test(lead)) {
+          return junkMatch(t, m.index, m.index + m[0].length, "unit");
+        }
+        return makeMatch(t, m.index, m.index + m[0].length, "money", {
+          value: tidy(toNumber(raw) / 100),
+          currency: "GBP",
+        });
+      },
     },
 
     // ---- Percentages, basis points, multiples ----
@@ -359,10 +427,11 @@
         makeMatch(t, m.index, m.index + m[0].length, "basisPoints", amountFields(m.groups)),
     },
     {
+      // "2.5x", "3.1 times earnings". "4 times a year" is a frequency, so it stays a count.
       when: /\d\s?[xX×]|times/,
       re: new RegExp(
         String.raw`(?<![\w.,])(?<n1>${NUM})${NUM_END}(?:${DASH}(?<n2>${NUM})${NUM_END})?` +
-          String.raw`(?:\s?[xX×](?![A-Za-z\d])|\s+times\b)`,
+          String.raw`(?:\s?[xX×](?![A-Za-z\d])|\s+times(?=\s+${VALUATION_BASIS}))`,
         "g"
       ),
       build: (m, t) => makeMatch(t, m.index, m.index + m[0].length, "multiple", amountFields(m.groups)),
@@ -464,8 +533,22 @@
     };
   }
 
-  const EPS_CONTEXT =
-    /\b(?:EPS|earnings\s+per\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share|(?:net\s+)?(?:income|loss)\s+per\s+(?:diluted\s+|basic\s+)?share|dividends?\s+of)\b/i;
+  // Per-share phrases. An unscaled dollar amount is per share only when one of these comes
+  // shortly before it in the same clause ("EPS rose to $1.42"), not just anywhere earlier.
+  const EPS_PHRASE =
+    /\b(?:EPS|earnings\s+per\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share|(?:net\s+)?(?:income|loss)\s+per\s+(?:diluted\s+|basic\s+)?share|per[-\s](?:diluted\s+|basic\s+)?share|a\s+share|dividends?\s+of)\b/gi;
+  const MAX_EPS_GAP_WORDS = 6;
+  const CLAUSE_BREAK = /[;:]|,\s+(?:and|but|while|whereas|although|though)\b|\.\s/i;
+
+  function tiedToPerShare(text, sentenceStart, amountStart) {
+    const lead = text.slice(sentenceStart, amountStart);
+    let last = null;
+    for (const m of lead.matchAll(EPS_PHRASE)) last = m;
+    if (!last) return false;
+    const gap = lead.slice(last.index + last[0].length);
+    if (CLAUSE_BREAK.test(gap)) return false;
+    return gap.split(/\s+/).filter(Boolean).length <= MAX_EPS_GAP_WORDS;
+  }
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -507,7 +590,8 @@
     if (end > start) sentences.push({ text: text.slice(start, end), start, end });
   }
 
-  function detectNumbers(text) {
+  // options.inTable: the text is a table cell, where bracketed amounts are always negative.
+  function detectNumbers(text, options = {}) {
     if (!text || !/\d|year|quarter|half|sequential|yoy|qoq|[yq]\/[yq]/i.test(text)) return [];
     const taken = [];
     const free = (s, e) => taken.every(([ts, te]) => e <= ts || s >= te);
@@ -516,6 +600,7 @@
     for (const pattern of PATTERNS) {
       // A cheap pre-check skips patterns that can't match this text.
       if (pattern.when && !pattern.when.test(text)) continue;
+      if (pattern.tableOnly && !options.inTable) continue;
       pattern.re.lastIndex = 0;
       for (const m of text.matchAll(pattern.re)) {
         const built = pattern.build(m, text);
@@ -540,14 +625,13 @@
       else merged.push(m);
     }
 
-    // Per-share figures named earlier in the sentence ("EPS of $1.42"), and "negative $5m".
+    // Per-share figures tied to a phrase just before them ("EPS of $1.42"), and "negative $5m".
     let sentences = null;
     for (const m of merged) {
       if (m.type === "money" && !m.scale) {
         sentences = sentences || splitSentences(text);
         const sentence = sentences.find((s) => m.start >= s.start && m.start < s.end) || { start: 0 };
-        const lead = text.slice(Math.max(sentence.start, m.start - 100), m.start);
-        if (EPS_CONTEXT.test(lead)) m.type = "perShare";
+        if (tiedToPerShare(text, sentence.start, m.start)) m.type = "perShare";
       }
       if (!m.junk && !m.isNegative && /\bnegative\s+$/i.test(text.slice(Math.max(0, m.start - 12), m.start))) {
         m.isNegative = true;

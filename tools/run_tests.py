@@ -1,8 +1,9 @@
-"""Run tests/run-tests.html in headless Edge or Chrome and print the results.
+"""Run tests/run-tests.html in headless Edge or Chrome and print the results for the
+development set (tests/detect-cases.js) and the held-out set (tests/holdout-cases.js).
 
 Usage (from anywhere):  python tools/run_tests.py
 Set FROGBOT_BROWSER to a browser executable to override the automatic search.
-Exits with status 1 if any test fails. Python standard library only.
+Exits with status 1 if any test in either set fails. Python standard library only.
 """
 
 import html
@@ -54,8 +55,24 @@ def main() -> None:
         sys.exit("The test page didn't produce results. Open tests/run-tests.html in a browser to see why.")
     results = json.loads(html.unescape(found.group(1)))
 
+    failed = report("Development set (tests/detect-cases.js)", results["development"])
+    print()
+    held_out = results["holdout"]
+    if held_out["summary"]["total"] == 0:
+        print("Held-out set (tests/holdout-cases.js)")
+        print("No held-out cases yet.")
+    else:
+        failed |= report("Held-out set (tests/holdout-cases.js)", held_out)
+    if failed:
+        sys.exit(1)
+
+
+def report(title: str, results: dict) -> bool:
+    """Print one set's summary, accuracy by type and failures. Returns True if any failed."""
     s = results["summary"]
-    print(f"Overall accuracy: {s['accuracy']}%  ({s['passed']} of {s['total']} cases pass, {s['failed']} failed)")
+    print(title)
+    print("=" * len(title))
+    print(f"Accuracy: {s['accuracy']}%  ({s['passed']} of {s['total']} cases pass, {s['failed']} failed)")
     print(f"Detection: {s['detectPassed']}/{s['detectTotal']}   Sentence splitting: {s['splitPassed']}/{s['splitTotal']}")
     print()
     print(f"{'Type':<22}{'Expected':>9}{'Correct':>9}{'Accuracy':>10}{'Extras':>8}")
@@ -64,10 +81,9 @@ def main() -> None:
         print(f"{name:<22}{r['expected']:>9}{r['correct']:>9}{acc:>10}{r['falsePositives']:>8}")
     if results["real"]:
         print()
-        print("On sentences from real releases: " + ", ".join(
+        print("On sentences from real pages: " + ", ".join(
             f"{t} {100 * r['correct'] / r['expected']:.1f}% ({r['correct']}/{r['expected']})"
             for t, r in results["real"].items()))
-
     if results["failures"]:
         print()
         print("Failures:")
@@ -78,7 +94,7 @@ def main() -> None:
             if f["kind"] == "split":
                 print(f"    expected: {f['expected']}")
                 print(f"    actual:   {f['actual']}")
-        sys.exit(1)
+    return bool(results["failures"])
 
 
 if __name__ == "__main__":

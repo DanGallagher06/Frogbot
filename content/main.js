@@ -202,7 +202,8 @@
     let junk = 0;
     let total = 0;
     for (const block of blocks) {
-      for (const match of Score.detectNumbers(block.text)) {
+      // Table cells read bracketed amounts as negatives ("($1.2 million)").
+      for (const match of Score.detectNumbers(block.text, { inTable: block.type === "table" })) {
         total += 1;
         if (match.junk) {
           junk += 1;

@@ -19,11 +19,13 @@
       font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
     main { max-width: 1100px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 4px; }
-    h2 { font-size: 17px; margin: 32px 0 8px; }
+    h2 { font-size: 19px; margin: 40px 0 4px; padding-top: 16px; border-top: 2px solid var(--line); }
+    h3 { font-size: 16px; margin: 28px 0 8px; }
     .muted { color: var(--muted); }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
     .card .big { font-size: 24px; font-weight: 700; }
+    .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 16px; margin-top: 12px; }
     .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
@@ -42,18 +44,16 @@
 <body>
 <main>
   <h1>Frogbot number detection tests</h1>
-  <p class="muted">Runs <code>content/score.js</code> against <code>tests/detect-cases.js</code>. Reload the page after editing either file.</p>
-  <section class="cards" id="summary"></section>
-
-  <h2>Accuracy by type</h2>
-  <div class="table-wrap"><table id="types"></table></div>
-
-  <h2>Detection cases</h2>
+  <p class="muted">Runs <code>content/score.js</code> against two sets of cases. Reload the page after editing the code or cases.</p>
   <p><label><input type="checkbox" id="only-failures"> Show failures only</label></p>
-  <div class="table-wrap"><table id="detect"></table></div>
 
-  <h2>Sentence splitting</h2>
-  <div class="table-wrap"><table id="split"></table></div>
+  <h2>Development set</h2>
+  <p class="muted"><code>tests/detect-cases.js</code>: the cases the code was built and fixed against.</p>
+  <div id="dev"></div>
+
+  <h2>Held-out set</h2>
+  <p class="muted"><code>tests/holdout-cases.js</code>: written from pages not used in development, never tuned against. This is the honest accuracy number.</p>
+  <div id="holdout"></div>
 </main>
 
 <!-- Machine-readable results for tools/run_tests.py. -->
@@ -61,55 +61,75 @@
 
 <script src="../content/score.js"></script>
 <script src="detect-cases.js"></script>
+<script src="holdout-cases.js"></script>
 <script src="harness.js"></script>
 <script>
-  const results = FrogbotTestHarness.runTests(FrogbotScore, FrogbotTestCases);
+  const sets = {
+    dev: FrogbotTestHarness.runTests(FrogbotScore, FrogbotTestCases),
+    holdout: FrogbotTestHarness.runTests(FrogbotScore, FrogbotHoldoutCases),
+  };
+
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const pct = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : "–");
-  const chip = (m) => `<span class="chip">${esc(m.raw)} · ${esc(m.junk ? "junk:" + m.junkReason : m.type)}${m.value !== null && m.value !== undefined && !m.junk ? " = " + esc(m.value) : ""}</span>`;
-  const s = results.summary;
+  const label = (m) => (m.junk ? "junk:" + m.junkReason : m.type);
+  const chip = (m) =>
+    `<span class="chip">${esc(m.raw)} · ${esc(label(m))}${m.value !== null && m.value !== undefined && !m.junk ? " = " + esc(m.value) : ""}</span>`;
+  const badge = (pass) => `<span class="badge ${pass ? "pass" : "fail"}">${pass ? "pass" : "fail"}</span>`;
 
-  const realLine = Object.entries(results.real).map(([t, r]) => `${t} ${pct(r.correct, r.expected)}`).join(" · ");
-  document.getElementById("summary").innerHTML = [
-    ["Overall accuracy", `${s.accuracy}%`, `${s.passed} of ${s.total} cases pass`],
-    ["Detection", `${s.detectPassed}/${s.detectTotal}`, pct(s.detectPassed, s.detectTotal)],
-    ["Sentence splitting", `${s.splitPassed}/${s.splitTotal}`, pct(s.splitPassed, s.splitTotal)],
-    ["Failed", s.failed, `ran in ${s.ms} ms`],
-    ["Real releases", "", realLine || "–"],
-  ].map(([label, big, sub]) => `<div class="card"><div class="muted">${label}</div><div class="big">${big}</div><div class="muted">${sub}</div></div>`).join("");
+  function renderSet(results, onlyFailures) {
+    const s = results.summary;
+    if (s.total === 0) return `<div class="empty">No held-out cases yet. See "Measuring accuracy honestly" in the README for how to add them.</div>`;
 
-  document.getElementById("types").innerHTML =
-    `<tr><th>Type</th><th class="num">Expected</th><th class="num">Correct</th><th class="num">Accuracy</th><th class="num">Unexpected extras</th></tr>` +
-    Object.entries(results.perType).sort(([a], [b]) => a.localeCompare(b)).map(([type, r]) =>
-      `<tr${r.correct < r.expected ? ' class="fail"' : ""}><td><code>${esc(type)}</code></td><td class="num">${r.expected}</td><td class="num">${r.correct}</td><td class="num">${pct(r.correct, r.expected)}</td><td class="num">${r.falsePositives}</td></tr>`
-    ).join("");
+    const realLine = Object.entries(results.real).map(([t, r]) => `${t} ${pct(r.correct, r.expected)}`).join(" · ");
+    const cards = [
+      ["Accuracy", `${s.accuracy}%`, `${s.passed} of ${s.total} cases pass`],
+      ["Detection", `${s.detectPassed}/${s.detectTotal}`, pct(s.detectPassed, s.detectTotal)],
+      ["Sentence splitting", `${s.splitPassed}/${s.splitTotal}`, s.splitTotal ? pct(s.splitPassed, s.splitTotal) : "no cases"],
+      ["Failed", s.failed, `ran in ${s.ms} ms`],
+      ["Real pages", "", realLine || "–"],
+    ].map(([name, big, sub]) => `<div class="card"><div class="muted">${name}</div><div class="big">${big}</div><div class="muted">${sub}</div></div>`).join("");
 
-  function renderDetect(onlyFailures) {
-    document.getElementById("detect").innerHTML =
+    const types =
+      `<tr><th>Type</th><th class="num">Expected</th><th class="num">Correct</th><th class="num">Accuracy</th><th class="num">Unexpected extras</th></tr>` +
+      Object.entries(results.perType).sort(([a], [b]) => a.localeCompare(b)).map(([type, r]) =>
+        `<tr${r.correct < r.expected ? ' class="fail"' : ""}><td><code>${esc(type)}</code></td><td class="num">${r.expected}</td><td class="num">${r.correct}</td><td class="num">${pct(r.correct, r.expected)}</td><td class="num">${r.falsePositives}</td></tr>`
+      ).join("");
+
+    const detect =
       `<tr><th>#</th><th>Result</th><th>Source</th><th>Text</th><th>Expected</th><th>Actual</th></tr>` +
       results.detect.map((r, i) => (onlyFailures && r.pass) ? "" :
-        `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td>
-          <td><span class="badge ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span></td>
-          <td>${esc(r.source)}</td>
+        `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td><td>${badge(r.pass)}</td>
+          <td>${esc(r.source)}${r.options ? `<br><code>${esc(JSON.stringify(r.options))}</code>` : ""}</td>
           <td>${esc(r.text)}${r.pass ? "" : `<ul class="problems">${r.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`}</td>
           <td>${r.expected.map(chip).join("") || '<span class="muted">none</span>'}</td>
           <td>${r.actual.map(chip).join("") || '<span class="muted">none</span>'}</td></tr>`
       ).join("");
+
+    const split = results.split.length
+      ? `<h3>Sentence splitting</h3><div class="table-wrap"><table>` +
+        `<tr><th>#</th><th>Result</th><th>Text</th><th>Expected</th><th>Actual</th></tr>` +
+        results.split.map((r, i) => (onlyFailures && r.pass) ? "" :
+          `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td><td>${badge(r.pass)}</td>
+            <td>${esc(r.text) || '<span class="muted">(empty)</span>'}</td>
+            <td>${r.expected.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td>
+            <td>${r.actual.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td></tr>`
+        ).join("") + `</table></div>`
+      : "";
+
+    return `<section class="cards">${cards}</section>
+      <h3>Accuracy by type</h3><div class="table-wrap"><table>${types}</table></div>
+      <h3>Detection cases</h3><div class="table-wrap"><table>${detect}</table></div>${split}`;
   }
-  renderDetect(false);
-  document.getElementById("only-failures").addEventListener("change", (e) => renderDetect(e.target.checked));
 
-  document.getElementById("split").innerHTML =
-    `<tr><th>#</th><th>Result</th><th>Text</th><th>Expected</th><th>Actual</th></tr>` +
-    results.split.map((r, i) =>
-      `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td>
-        <td><span class="badge ${r.pass ? "pass" : "fail"}">${r.pass ? "pass" : "fail"}</span></td>
-        <td>${esc(r.text) || '<span class="muted">(empty)</span>'}</td>
-        <td>${r.expected.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td>
-        <td>${r.actual.map((t) => `<span class="chip">${esc(t)}</span>`).join("<br>")}</td></tr>`
-    ).join("");
+  function render() {
+    const onlyFailures = document.getElementById("only-failures").checked;
+    document.getElementById("dev").innerHTML = renderSet(sets.dev, onlyFailures);
+    document.getElementById("holdout").innerHTML = renderSet(sets.holdout, onlyFailures);
+  }
+  render();
+  document.getElementById("only-failures").addEventListener("change", render);
 
-  document.getElementById("results-json").textContent = JSON.stringify({
+  const forPython = (results) => ({
     summary: results.summary,
     perType: results.perType,
     real: results.real,
@@ -117,6 +137,10 @@
       ...results.detect.filter((r) => !r.pass).map((r) => ({ kind: "detect", source: r.source, text: r.text, problems: r.problems })),
       ...results.split.filter((r) => !r.pass).map((r) => ({ kind: "split", text: r.text, expected: r.expected, actual: r.actual, problems: r.problems })),
     ],
+  });
+  document.getElementById("results-json").textContent = JSON.stringify({
+    development: forPython(sets.dev),
+    holdout: forPython(sets.holdout),
   });
 </script>
 </body>

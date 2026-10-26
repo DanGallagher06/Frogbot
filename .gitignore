@@ -7,3 +7,6 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Saved copies of real web pages for local testing (not ours to redistribute)
+test-pages/local/

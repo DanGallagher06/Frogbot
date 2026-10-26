@@ -1,8 +1,9 @@
-// Runs the detection and sentence-splitting cases against FrogbotScore and returns
-// plain results data. Used by run-tests.html (which renders it) and, through that page,
-// by tools/run_tests.py.
+// Runs one set of detection and sentence-splitting cases against FrogbotScore and returns
+// plain results data. run-tests.html calls it once for the development set and once for
+// the held-out set, renders both, and tools/run_tests.py reads the results from that page.
+// A case may carry `options` (e.g. { inTable: true }), passed to detectNumbers.
 (() => {
-  const CHECKED_FIELDS = ["type", "value", "currency", "scale", "isNegative", "low", "high", "junk", "junkReason"];
+  const CHECKED_FIELDS = ["type", "value", "currency", "scale", "isNegative", "low", "high", "junk", "junkReason", "decade"];
   const REAL_SOURCE_TYPES = ["money", "percent", "perShare"];
 
   const sameValue = (a, b) =>
@@ -24,7 +25,7 @@
   }
 
   function runDetectCase(score, testCase) {
-    const actual = score.detectNumbers(testCase.text);
+    const actual = score.detectNumbers(testCase.text, testCase.options || {});
     const used = new Set();
     const problems = [];
     const outcomes = testCase.expected.map((exp) => {
@@ -60,8 +61,9 @@
 
   function runTests(score, cases) {
     const started = Date.now();
-    const detect = cases.detect.map((c) => runDetectCase(score, c));
-    const split = cases.split.map((c) => runSplitCase(score, c));
+    // Entries marked `example: true` only illustrate the format and are never run.
+    const detect = (cases.detect || []).filter((c) => !c.example).map((c) => runDetectCase(score, c));
+    const split = (cases.split || []).map((c) => runSplitCase(score, c));
 
     // Per-type accuracy: expected matches found with every checked field right.
     const perType = {};
@@ -99,7 +101,7 @@
         total,
         passed: detectPassed + splitPassed,
         failed: total - detectPassed - splitPassed,
-        accuracy: Math.round(((detectPassed + splitPassed) / total) * 1000) / 10,
+        accuracy: total ? Math.round(((detectPassed + splitPassed) / total) * 1000) / 10 : null,
         ms: Date.now() - started,
       },
     };

@@ -228,6 +228,13 @@
       });
       await waitForScrollToSettle(gen, top);
       checkAlive(gen);
+      // Some pages ignore a smooth scroll while their own scripts are busy; jump instead.
+      const after = frogEl.getBoundingClientRect();
+      if (after.top < 0 || after.bottom > innerHeight) {
+        window.scrollTo({ top, left: scrollX, behavior: "auto" });
+        await waitForScrollToSettle(gen);
+        checkAlive(gen);
+      }
     },
 
     // Moves the frog straight to a spot (no hop), e.g. when the page shifts under it.

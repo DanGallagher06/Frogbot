@@ -137,6 +137,49 @@
     { source: "synthetic", text: "It announced a 3-for-1 stock split.", expected: [count("3", 3), count("1", 1)] },
     { source: "synthetic", text: "Prices should recover by mid-2025.", expected: [year("2025")] },
 
+    // ---- Per share: only when tied to a per-share phrase in the same clause ----
+    {
+      source: "synthetic",
+      text: "EPS of $1.42; capital expenditure was $350 million and the dividend was $0.10 per share",
+      expected: [eps("$1.42", 1.42), money("$350 million", 350000000), eps("$0.10 per share", 0.1)],
+    },
+    { source: "synthetic", text: "EPS rose to $1.42, and the company spent $40 on each unit", expected: [eps("$1.42", 1.42), money("$40", 40)] },
+    { source: "synthetic", text: "EPS was $2.10. The company also paid $15 for each widget.", expected: [eps("$2.10", 2.1), money("$15", 15)] },
+    { source: "synthetic", text: "Diluted EPS of $0.88 compared with analysts' forecasts, while the average order value rose to $64.", expected: [eps("$0.88", 0.88), money("$64", 64)] },
+    { source: "synthetic", text: "It earned $3.25 a share in the quarter.", expected: [eps("$3.25 a share", 3.25)] },
+    { source: "synthetic", text: "Each $5 a shareholder paid was refunded.", expected: [money("$5", 5)] },
+
+    // ---- Bracketed amounts: negative in tables, an aside in prose ----
+    { source: "synthetic", text: "($1.2 million)", options: { inTable: true }, expected: [money("($1.2 million)", -1200000, { isNegative: true })] },
+    { source: "synthetic", text: "($1.2 million)", expected: [money("$1.2 million", 1200000, { isNegative: false })] },
+    { source: "synthetic", text: "Restructuring costs ($1.2 million) were lower than expected.", expected: [money("$1.2 million", 1200000, { isNegative: false })] },
+    { source: "synthetic", text: "(£3.4bn)", options: { inTable: true }, expected: [money("(£3.4bn)", -3400000000, { isNegative: true, currency: "GBP" })] },
+    { source: "synthetic", text: "Net loss ($0.45) per share", expected: [money("($0.45)", -0.45, { isNegative: true })] },
+
+    // ---- Pence ----
+    { source: "synthetic", text: "Shares fell 5 per cent to 240p.", expected: [pct("5 per cent", 5), money("240p", 2.4, { currency: "GBP" })] },
+    { source: "synthetic", text: "The shares closed at 98.5p, up 3p.", expected: [money("98.5p", 0.985, { currency: "GBP" }), money("3p", 0.03, { currency: "GBP" })] },
+    { source: "synthetic", text: "The final dividend is 15.5p.", expected: [money("15.5p", 0.155, { currency: "GBP" })] },
+    { source: "synthetic", text: "It streams in 1080p and 720p.", expected: [junk("1080p", "resolution"), junk("720p", "resolution")] },
+    { source: "synthetic", text: "Plug in the 4p connector.", expected: [junk("4p", "unit")] },
+
+    // ---- Period ranges ----
+    { source: "synthetic", text: "Revenue for Q1-Q3 2026 rose.", expected: [period("Q1-Q3 2026", { low: 1, high: 3, value: 2026 })] },
+    { source: "synthetic", text: "Q1–Q3 margins improved.", expected: [period("Q1–Q3", { low: 1, high: 3, value: null })] },
+    { source: "synthetic", text: "H1-H2 trends diverged.", expected: [period("H1-H2", { low: 1, high: 2 })] },
+
+    // ---- Multiples vs frequencies ----
+    { source: "synthetic", text: "It pays a dividend 4 times a year.", expected: [count("4", 4)] },
+    { source: "synthetic", text: "The stock trades at 12 times forward earnings.", expected: [{ raw: "12 times", type: "multiple", value: 12 }] },
+    { source: "synthetic", text: "The deal values it at 8 times EBITDA.", expected: [{ raw: "8 times", type: "multiple", value: 8 }] },
+    { source: "synthetic", text: "Prices rose three times last year.", expected: [] },
+
+    // ---- Decades ----
+    { source: "synthetic", text: "Growth like the 1990s returned.", expected: [period("1990s", { value: 1990, decade: true })] },
+    { source: "synthetic", text: "Rates last seen in the '90s are back.", expected: [period("'90s", { value: 1990, decade: true })] },
+    { source: "synthetic", text: "Prices peaked in the 2000s.", expected: [period("2000s", { value: 2000, decade: true })] },
+    { source: "synthetic", text: "Nvidia went public in 1999.", expected: [year("1999")] },
+
     // ---- Real sentences: test page ----
     {
       source: "test-page",
