@@ -19,10 +19,13 @@ After you change any file, click the reload icon on Frogbot's card in `chrome://
 1. On Frogbot's **Details** page in `chrome://extensions`, turn on **Allow access to file URLs**.
 2. Open `test-pages/earnings-sample.html` in Chrome (drag it into a tab).
 3. Click the Frogbot icon, then **Release the frog**.
-4. The frog appears at the top centre of the page (`Frogbot here` is logged in the page's
-   DevTools console), then hops to the four `data-frogbot-target` elements in order, flicking
-   its tongue at each one to highlight it. Press **Escape** at any point to remove the frog and
-   all highlights.
+4. The frog appears just above the article (`Frogbot here` is logged in the page's DevTools
+   console), then hops down the page to the sentences and table rows with the most important
+   numbers, flicking its tongue at each one to highlight it. Press **Escape** at any point to
+   remove the frog and all highlights.
+
+Add `?frogbot-fixed` to the test page's URL to make the frog hop to the four hand-placed
+`data-frogbot-target` elements instead of scored targets (useful for checking the animation).
 
 ### Debug view: "Show what Frogbot reads"
 
@@ -30,13 +33,16 @@ Tick **Show what Frogbot reads** in the popup before releasing the frog (the set
 remembered). Frogbot then outlines everything it extracted from the page:
 
 - the chosen main content container in solid red
-- every text block in a dashed outline coloured by type, with a small `index type` label:
-  paragraph grey, list green, table blue, heading purple, quote orange
+- every text block in a dashed outline coloured by type, with a small `index type · score`
+  label (the best score of the block's sentences or table row): paragraph grey, list green,
+  table blue, heading purple, quote orange
+- the chosen targets with a solid outline instead of a dashed one
 
 It also logs a `console.table` of the blocks (index, type, first 60 characters, length) and the
 extraction time to the page's DevTools console, followed by a table of the numbers found on
 the page by type (plus how many were junk, like phone numbers and footnote markers) and how
-long detection took. Escape clears the outlines with the frog.
+long detection took, then a table of every scored sentence and table row (score, whether it
+was chosen, and the reasons) and how long scoring took. Escape clears the outlines with the frog.
 
 The sample page is a fictional earnings release for "Lilypad Holdings". It contains real-looking
 financial figures plus junk numbers (phone numbers, a street address, a page number, footnote
@@ -60,7 +66,8 @@ content/score.js     window.FrogbotScore: sentence splitting and number detectio
 content/highlight.js window.FrogbotHighlight: mark() and clearAll()
 assets/frog.svg      Reference copy of the frog artwork
 test-pages/          Local pages for testing
-tests/               Number-detection test cases and the browser test runner
+tests/               Detection, scoring and held-out test cases, the browser test runner,
+                     and snapshots of the targets picked on each test page
 tools/               Developer scripts (not part of the extension)
 ```
 
@@ -73,6 +80,9 @@ and sentence splitting; see "Measuring accuracy honestly" below).
 - **In the browser:** open `tests/run-tests.html` straight from the file system in Edge or
   Chrome. It shows a summary, accuracy for each number type, and a row per case; failed
   rows show what was expected and what was found. Reload after editing the code or cases.
+The page has three sections: the development detection cases, the scoring cases
+(`tests/score-cases.js`) and the held-out set.
+
 - **From the command line:** `python tools/run_tests.py` runs the same page in headless
   Edge or Chrome and prints the summary and any failures for each set (exit status 1 if
   anything fails).
@@ -81,6 +91,41 @@ and sentence splitting; see "Measuring accuracy honestly" below).
 To add a case, copy one in `tests/detect-cases.js`: give the text, where it came from, and
 the numbers you expect. Only the fields you list are checked, but every number found must
 be expected.
+
+## How the frog chooses targets
+
+`extract.js` turns the page's blocks into units: each sentence of a paragraph, list item or
+quote, and each table row (its cells joined with " | ", plus the column headers above its
+figures). `score.js` scores every unit with `scoreUnit()` and picks targets with
+`pickTargets()`:
+
+- Points for money, percentages and per-share figures, a change word near a number, finance
+  terms, periods, comparisons and context (bold text, a heading with a number, or a table row
+  without column headers; rows with headers get the period point from them instead), and
+  penalties for units with only counts or years, only junk, or over 60 words, and for old
+  figures: a unit whose newest explicit year is 5-9 years older than the newest year on the
+  page loses 2, and 10 or more years older loses 4 (not when it names a current period such
+  as "Q3", or has no year). Every weight, and the topic list below, is in the `WEIGHTS`
+  object at the top of `score.js`.
+- Units below `MIN_SCORE` are dropped. Ties go to prose sentences over table rows, then to
+  units with more distinct positive signals, then to page order.
+- While picking, a unit whose main figure was already picked loses points and has to compete
+  again (so a figure isn't caught twice). For variety, a unit also loses 2 for each chosen
+  unit already on its topic (-2, -4, -6...). Topics are revenue, gross profit, operating
+  income, net income, EPS, margin, guidance, cash flow, debt, dividends/buybacks,
+  growth/estimates and other. A sentence is guidance only when it's the company's own
+  forward-looking statement ("Lilypad expects", "full-year guidance", "next quarter", or
+  "revenue is expected to"); analysts' expectations are growth/estimates. The first table row
+  on a named topic is exempt, so a headline row like an infobox "Revenue" isn't crowded out
+  by sentences. The topic penalty only reorders the queue; it never drops a unit below
+  `MIN_SCORE` and isn't included in the displayed score.
+- About one target per 100 words of article (3 to 12, and at least 5 when 5 or more units
+  pass the threshold), at most 2 from one block and 4 rows from one table, then sorted into
+  page order so the frog only hops downward.
+
+After changing weights, run `python tools/snapshot_targets.py`. It prints how the picks
+changed on each test page compared with `tests/snapshots/`; run it with `--update` to save
+the new picks once you're happy with them.
 
 ## Measuring accuracy honestly
 
@@ -109,6 +154,26 @@ To add held-out cases:
 The three entries already in `holdout-cases.js` are format examples marked `example: true`;
 the runner skips them, so it reports "No held-out cases yet" until real ones are added.
 
+## Known issues
+
+- **Pages that scroll inside a box.** Some sites (currently BBC) scroll the article inside
+  an inner container instead of scrolling the page itself, sometimes switching to that only
+  after the frog appears. The frog is positioned on the page, so its scroll-in check can fail
+  there. It still lands next to its targets. To be handled in a later step.
+- **Start position on those pages.** The same layout switch occasionally moves BBC's first
+  paragraph under the frog after it has appeared, so the frog can end up sitting on text.
+
+## Backlog
+
+- Detect numbers during extraction, so scoring doesn't compute them a second time. Scoring
+  takes about 30ms on a big earnings release (the Nvidia release), which is acceptable for now.
+- "to" and "from" are loose change words (they match "returned $24.3 billion to
+  shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
+  like "from X to Y" or right after a change verb ("rose to", "fell from").
+- Tighten the passive "is expected to" guidance rule to require a company subject. At the
+  moment it can tag industry-wide forecasts as guidance (for example BBC's "the tech industry
+  is expected to spend a combined $765bn" sentence).
+
 ## Editing the frog artwork
 
 `assets/frog.svg` is the source of truth for the frog. `content/frog.js` holds a copy of it
@@ -131,6 +196,7 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
   - Step 7: number detection in `score.js`: every number in a text with its type (money,
     percent, basis points, per share, multiple, period, date, year, count), value, currency,
     scale, ranges and negatives, with junk like phone numbers flagged, plus a test suite (done)
+  - Step 8: scoring sentences and table rows and choosing the frog's targets (done)
 - **Milestone 2: Find the numbers.** Extract numbers from the article text and score them by
   importance, ignoring junk such as phone numbers, dates in boilerplate and page numbers.
 - **Milestone 3: Tongue highlights.** The frog hops to each important number and highlights it

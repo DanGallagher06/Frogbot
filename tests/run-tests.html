@@ -51,6 +51,10 @@
   <p class="muted"><code>tests/detect-cases.js</code>: the cases the code was built and fixed against.</p>
   <div id="dev"></div>
 
+  <h2>Scoring</h2>
+  <p class="muted"><code>tests/score-cases.js</code>: which sentences and table rows should outscore others, pass or miss the threshold, and get picked.</p>
+  <div id="scoring"></div>
+
   <h2>Held-out set</h2>
   <p class="muted"><code>tests/holdout-cases.js</code>: written from pages not used in development, never tuned against. This is the honest accuracy number.</p>
   <div id="holdout"></div>
@@ -62,12 +66,31 @@
 <script src="../content/score.js"></script>
 <script src="detect-cases.js"></script>
 <script src="holdout-cases.js"></script>
+<script src="score-cases.js"></script>
 <script src="harness.js"></script>
 <script>
   const sets = {
     dev: FrogbotTestHarness.runTests(FrogbotScore, FrogbotTestCases),
     holdout: FrogbotTestHarness.runTests(FrogbotScore, FrogbotHoldoutCases),
   };
+  const scoring = FrogbotTestHarness.runScoreTests(FrogbotScore, FrogbotScoreCases);
+
+  function renderScoring(onlyFailures) {
+    const s = scoring.summary;
+    const kinds = Object.entries(scoring.byKind).map(([k, r]) => `${k} ${r.passed}/${r.total}`).join(" · ");
+    const cards = [
+      ["Accuracy", `${s.accuracy}%`, `${s.passed} of ${s.total} cases pass`],
+      ["By kind", "", kinds],
+      ["Failed", s.failed, `ran in ${s.ms} ms`],
+    ].map(([name, big, sub]) => `<div class="card"><div class="muted">${name}</div><div class="big">${big}</div><div class="muted">${sub}</div></div>`).join("");
+    const rows =
+      `<tr><th>#</th><th>Result</th><th>Kind</th><th>Case</th><th>Scores</th></tr>` +
+      scoring.results.map((r, i) => (onlyFailures && r.pass) ? "" :
+        `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td><td>${badge(r.pass)}</td><td><code>${esc(r.kind)}</code></td>
+          <td>${esc(r.label)}</td><td class="muted">${esc(r.detail)}</td></tr>`
+      ).join("");
+    return `<section class="cards">${cards}</section><h3>Cases</h3><div class="table-wrap"><table>${rows}</table></div>`;
+  }
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const pct = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : "–");
@@ -125,6 +148,7 @@
     const onlyFailures = document.getElementById("only-failures").checked;
     document.getElementById("dev").innerHTML = renderSet(sets.dev, onlyFailures);
     document.getElementById("holdout").innerHTML = renderSet(sets.holdout, onlyFailures);
+    document.getElementById("scoring").innerHTML = renderScoring(onlyFailures);
   }
   render();
   document.getElementById("only-failures").addEventListener("change", render);
@@ -141,6 +165,11 @@
   document.getElementById("results-json").textContent = JSON.stringify({
     development: forPython(sets.dev),
     holdout: forPython(sets.holdout),
+    scoring: {
+      summary: scoring.summary,
+      byKind: scoring.byKind,
+      failures: scoring.results.filter((r) => !r.pass).map((r) => ({ kind: r.kind, label: r.label, detail: r.detail })),
+    },
   });
 </script>
 </body>

@@ -134,6 +134,11 @@
     { source: "synthetic", text: "It joined the S&P 500 index.", expected: [junk("S&P 500", "name")] },
     { source: "synthetic", text: "The COVID-19 pandemic hit sales.", expected: [junk("COVID-19", "model")] },
     { source: "synthetic", text: "NVIDIA (NASDAQ: NVDA) shares rose.", expected: [] },
+    // Inflation notes: the restated amount and its year aren't figures of the story.
+    { source: "wikipedia", text: "It was introduced at a price of $666.66 (equivalent to $3,770 in 2025).", expected: [money("$666.66", 666.66), junk("equivalent to $3,770 in 2025", "inflation")] },
+    { source: "wikipedia", text: "Together they raised $1,300 (equivalent to about $7,400 in 2025).", expected: [money("$1,300", 1300), junk("equivalent to about $7,400 in 2025", "inflation")] },
+    { source: "synthetic", text: "The club was sold for £5 million (equivalent to £9.1 million in 2024) in 1998.", expected: [money("£5 million", 5000000), junk("equivalent to £9.1 million in 2024", "inflation"), year("1998")] },
+    { source: "synthetic", text: "Revenue in 2025 was equivalent to 3% of GDP.", expected: [year("2025"), pct("3%", 3)] },
     { source: "synthetic", text: "It announced a 3-for-1 stock split.", expected: [count("3", 3), count("1", 1)] },
     { source: "synthetic", text: "Prices should recover by mid-2025.", expected: [year("2025")] },
 
@@ -272,7 +277,7 @@
     // ---- Real sentences: Wikipedia and BBC ----
     { source: "wikipedia", text: "US$215.9 billion (FY26)", expected: [money("US$215.9 billion", 215900000000, { currency: "USD" }), period("FY26")] },
     { source: "wikipedia", text: "42,000 (FY26)", expected: [count("42,000", 42000), period("FY26")] },
-    { source: "wikipedia", text: "With $40,000 in the bank (equivalent to $89,000 in 2025), the company was born.", expected: [money("$40,000", 40000), money("$89,000", 89000), year("2025")] },
+    { source: "wikipedia", text: "With $40,000 in the bank (equivalent to $89,000 in 2025), the company was born.", expected: [money("$40,000", 40000), junk("equivalent to $89,000 in 2025", "inflation")] },
     { source: "wikipedia", text: "As of January 7, 2025, Nvidia's $3.66 trillion market cap was worth more than double.", expected: [date("January 7, 2025"), money("$3.66 trillion", 3660000000000)] },
     { source: "wikipedia", text: "Nvidia GeForce RTX 2080 Ti, part of the RTX 20 series, uses 256 KB of L2 cache.", expected: [junk("GeForce RTX 2080 Ti", "model"), junk("RTX 20", "model"), count("256", 256), junk("L2", "model")] },
     { source: "bbc", text: "There are about 12,250 data centres around the world, according to Data Center Map.", expected: [count("12,250", 12250)] },

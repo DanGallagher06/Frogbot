@@ -107,7 +107,101 @@
     };
   }
 
-  const harness = { runTests };
+  // ---- Scoring cases (tests/score-cases.js) ----
+
+  // A case's unit: a sentence string, or { text, row, headers, context, group }.
+  function toUnit(spec, index) {
+    const u = typeof spec === "string" ? { text: spec } : spec;
+    const isRow = Boolean(u.row);
+    return {
+      text: u.text,
+      kind: isRow ? "row" : "sentence",
+      headers: u.headers || [],
+      context: { inTable: isRow, ...(u.context || {}) },
+      group: u.group ?? `unit:${index}`,
+      table: isRow ? (u.context && u.context.table) || "table" : null,
+      order: index,
+    };
+  }
+
+  function scored(score, spec, index = 0) {
+    const unit = toUnit(spec, index);
+    unit.numbers = score.detectNumbers(unit.text, { inTable: unit.kind === "row" });
+    const headerNumbers = unit.headers.flatMap((h) => score.detectNumbers(h));
+    const hasHeaders = unit.headers.length > 0;
+    Object.assign(unit, score.scoreUnit(unit, unit.numbers, { ...unit.context, headerNumbers, hasHeaders }));
+    unit.words = unit.text.split(/\s+/).filter(Boolean).length;
+    return unit;
+  }
+
+  const describe = (u) => `${u.score} (${u.reasons.join(", ") || "no signals"})`;
+
+  function runScoreCase(score, c) {
+    const min = score.MIN_SCORE;
+    if (c.kind === "picks") {
+      const units = c.units.map((spec, i) => scored(score, spec, i));
+      const chosen = score.pickTargets(units, { totalWords: c.totalWords }).map((u) => u.order);
+      const pass = chosen.length === c.expect.length && chosen.every((v, i) => v === c.expect[i]);
+      return {
+        ...c,
+        label: `picks [${c.expect.join(", ")}] from ${units.length} units`,
+        detail: `chose [${chosen.join(", ")}]; scores ${units.map((u) => u.finalScore ?? u.score).join(", ")}`,
+        pass,
+      };
+    }
+    if (c.kind === "pageYear") {
+      const numbers = c.texts.flatMap((text) => score.detectNumbers(text));
+      const got = score.pageYear(numbers, c.currentYear);
+      return { ...c, label: `page year is ${c.expect} (current year ${c.currentYear})`, detail: `got ${got}`, pass: got === c.expect };
+    }
+    if (c.kind === "topic") {
+      const got = score.topicOf(c.text);
+      return { ...c, label: `"${c.text}" is topic ${c.topic}`, detail: `topic ${got}`, pass: got === c.topic };
+    }
+    if (c.kind === "same") {
+      const a = scored(score, c.a);
+      const b = scored(score, c.b, 1);
+      return { ...c, label: `"${a.text}" scores the same as "${b.text}"`, detail: `A ${describe(a)} vs B ${describe(b)}`, pass: a.score === b.score };
+    }
+    if (c.kind === "beats") {
+      const a = scored(score, c.a);
+      const b = scored(score, c.b, 1);
+      return { ...c, label: `"${a.text}" beats "${b.text}"`, detail: `A ${describe(a)} vs B ${describe(b)}`, pass: a.score > b.score };
+    }
+    const u = scored(score, c.unit);
+    const tests = {
+      passes: [u.score >= min, `passes MIN_SCORE ${min}`],
+      fails: [u.score < min, `stays below MIN_SCORE ${min}`],
+      below: [u.score < c.than, `scores below ${c.than}`],
+    };
+    const [pass, what] = tests[c.kind];
+    return { ...c, label: `"${u.text}" ${what}`, detail: describe(u), pass };
+  }
+
+  function runScoreTests(score, cases) {
+    const started = Date.now();
+    const results = (cases || []).map((c) => runScoreCase(score, c));
+    const passed = results.filter((r) => r.pass).length;
+    const byKind = {};
+    for (const r of results) {
+      byKind[r.kind] = byKind[r.kind] || { total: 0, passed: 0 };
+      byKind[r.kind].total += 1;
+      if (r.pass) byKind[r.kind].passed += 1;
+    }
+    return {
+      results,
+      byKind,
+      summary: {
+        total: results.length,
+        passed,
+        failed: results.length - passed,
+        accuracy: results.length ? Math.round((passed / results.length) * 1000) / 10 : null,
+        ms: Date.now() - started,
+      },
+    };
+  }
+
+  const harness = { runTests, runScoreTests };
   if (typeof window !== "undefined") window.FrogbotTestHarness = harness;
   if (typeof module !== "undefined" && module.exports) module.exports = harness;
 })();

@@ -1,7 +1,61 @@
-// Frogbot: number detection (step 7). Scoring and ranking come in step 8.
-// Pure string functions with no DOM access, so they can be tested on their own:
+// Frogbot: number detection (step 7) and scoring (step 8).
+// Pure functions with no DOM access, so they can be tested on their own:
 // open tests/run-tests.html, or run `python tools/run_tests.py`.
+// Page code (extract.js) turns blocks into units; this file scores them and picks targets.
 (() => {
+  // ---------------------------------------------------------------------------
+  // Scoring weights: every number that decides what the frog visits lives here.
+  // Change them only with evidence (tests/score-cases.js and the page snapshots).
+  // ---------------------------------------------------------------------------
+
+  const WEIGHTS = {
+    money: 3, // contains money (non-junk)
+    percent: 3, // contains a percent or basis points
+    perShare: 3, // contains a per-share figure
+    changeWord: 2, // a number within CHANGE_WINDOW words of rose/fell/grew/up/down...
+    financeTerm: 2, // revenue, margin, EPS, guidance...
+    period: 1, // a period reference, or a quarter/year in a table header
+    comparison: 1, // versus, compared with, from X to Y, year-over-year, consensus...
+    context: 1, // bold, under a heading containing a number, or a table row without column headers
+    multiple: 1, // a valuation multiple
+    onlyCounts: -2, // only counts/years and no money, percent or per-share figure
+    onlyJunk: -4, // numbers, but all of them junk (phones, copyright years...)
+    rambling: -1, // over RAMBLING_WORDS words
+    duplicate: -3, // its main figure was already picked in a higher-scoring unit
+    topicCovered: -2, // selection only, per chosen unit already on its topic: -2, -4, -6...
+    recencyDated: -2, // newest explicit year is 5-9 years older than the newest year on the page
+    recencyOld: -4, // ... 10 or more years older
+
+    // Topics for variety, in priority order (a unit takes the topic of its earliest finance
+    // term; on a tie the topic listed first wins, so "earnings per share" is EPS, not net
+    // income). The company's own forward-looking statements are guidance whatever their first
+    // term (see forwardTopic). Units with no finance term are "other", a topic like the rest.
+    topics: [
+      ["EPS/per share", /\bEPS\b|earnings\s+per\s+(?:diluted\s+|basic\s+)?(?:common\s+)?share|per[-\s](?:diluted\s+)?share/i],
+      ["revenue/sales", /\brevenues?\b|\bsales\b/i],
+      ["margin", /\bmargins?\b/i],
+      ["gross profit", /\bgross profits?\b/i],
+      ["operating income", /\boperating (?:income|profits?|loss)\b|\bEBITD?A?\b/i],
+      ["net income", /\bnet (?:income|profits?|earnings|loss)\b|\bprofits?\b|\bincome\b|\bearnings\b/i],
+      ["guidance/outlook/forecast", /\bguidance\b|\boutlook\b|\bforecasts?\b/i],
+      ["cash flow", /\bcash flow\b/i],
+      ["debt", /\bdebt\b/i],
+      ["dividend/buyback", /\bdividends?\b|\bbuybacks?\b|\brepurchases?\b/i],
+      ["growth/estimates", /\bgrowth\b|\bestimates?\b|\bconsensus\b/i],
+    ],
+  };
+  const MIN_SCORE = 5;
+  const RECENCY_DATED_YEARS = 5;
+  const RECENCY_OLD_YEARS = 10;
+  const CHANGE_WINDOW = 4;
+  const RAMBLING_WORDS = 60;
+  const WORDS_PER_TARGET = 100;
+  const MIN_TARGETS = 3;
+  const MIN_TARGETS_WHEN_RICH = 5; // when at least this many units pass MIN_SCORE
+  const MAX_TARGETS = 12;
+  const MAX_PER_BLOCK = 2;
+  const MAX_ROWS_PER_TABLE = 4;
+
   // ---------------------------------------------------------------------------
   // Building blocks
   // ---------------------------------------------------------------------------
@@ -114,6 +168,13 @@
 
   const PATTERNS = [
     // ---- Junk that contains digits but isn't a figure ----
+    {
+      // Inflation notes: "(equivalent to $3,770 in 2025)". Neither the amount nor the year is a
+      // figure of the story; the note restates an older figure in today's money.
+      when: /equivalent to/i,
+      re: /\bequivalent to\s+(?:about\s+|approximately\s+|roughly\s+|around\s+)?(?:US\$|C\$|A\$|NZ\$|HK\$|\$|£|€|¥)?\d[\d,.]*(?:\s?(?:thousand|million|billion|trillion|mn|bn|[kKmMbB]))?\s+in\s+(?:19|20)\d{2}\b/gi,
+      build: (m, t) => junkMatch(t, m.index, m.index + m[0].length, "inflation"),
+    },
     {
       re: /\b(?:https?:\/\/|www\.)[^\s<>"')]+/gi,
       when: /www\.|https?:/i,
@@ -551,6 +612,309 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Scoring (step 8)
+  // ---------------------------------------------------------------------------
+
+  const CHANGE_WORDS = new Set(
+    ("rose rise rises risen rising fell fall falls fallen falling grew grow grows growing " +
+      "increased increase increases decreased decrease decreases declined decline declines " +
+      "jumped jump jumps slipped slip slips up down beat beats missed miss misses topped tops " +
+      "exceeded exceeds improved improves widened widens narrowed narrows from to").split(" ")
+  );
+  const CHANGE_TEST = new RegExp(`\\b(?:${[...CHANGE_WORDS].join("|")})\\b`, "i");
+  const wordCount = (text) => (text.match(/\S+/g) || []).length;
+  const FINANCE_TERM =
+    /\b(?:revenues?|sales|profits?|net income|operating income|margins?|EPS|earnings|guidance|outlook|forecasts?|cash flow|debt|dividends?|buybacks?|repurchases?|growth|estimates?|consensus)\b/i;
+  const COMPARISON =
+    /\b(?:versus|vs\.?|compared (?:with|to)|year[\s-](?:over|on)[\s-]year|(?:above|below|ahead of|short of|in line with) (?:expectations|estimates|forecasts|consensus)|consensus|a year (?:ago|earlier)|prior[\s-]year)\b|\bfrom\b[^.;]{1,60}?\bto\b/i;
+  // Types that count as "a figure" for change words and the only-counts penalty.
+  const KEY_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "multiple"]);
+  const CHANGEABLE = new Set(["money", "perShare", "percent", "basisPoints", "multiple", "count"]);
+  const PERIOD_LIKE = new Set(["period", "year", "date"]);
+
+  const wordsOf = (text) => [...text.matchAll(/\S+/g)].map((m) => ({
+    word: m[0].toLowerCase().replace(/^[^\w$£€¥%+-]+|[^\w%]+$/g, ""),
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
+
+  // Is a change word within CHANGE_WINDOW words of this number?
+  function nearChangeWord(words, match) {
+    const first = words.findIndex((w) => w.end > match.start);
+    let last = first;
+    while (last + 1 < words.length && words[last + 1].start < match.end) last++;
+    if (first === -1) return false;
+    for (let i = Math.max(0, first - CHANGE_WINDOW); i <= Math.min(words.length - 1, last + CHANGE_WINDOW); i++) {
+      if ((i < first || i > last) && CHANGE_WORDS.has(words[i].word)) return true;
+    }
+    return false;
+  }
+
+  // Score one unit: a sentence, or a table row joined with " | ".
+  // numbers: detectNumbers() on unit.text. context: { inTable, bold, underNumberHeading,
+  // headerNumbers } where headerNumbers are detected in the column headers above the
+  // row's figures. Each signal counts once.
+  function scoreUnit(unit, numbers, context = {}) {
+    const reasons = [];
+    let score = 0;
+    const add = (name, label) => {
+      score += WEIGHTS[name];
+      reasons.push(`${label} ${WEIGHTS[name] > 0 ? "+" : ""}${WEIGHTS[name]}`);
+    };
+    const real = numbers.filter((n) => !n.junk);
+    // Context signals ignore words inside junk: an inflation note's "equivalent to" isn't a
+    // change word, and a phone number line's words aren't finance terms. Junk spans are
+    // blanked out (same length, so number positions still line up).
+    let text = unit.text;
+    for (const n of numbers) {
+      if (n.junk) text = text.slice(0, n.start) + " ".repeat(n.end - n.start) + text.slice(n.end);
+    }
+    const has = (...types) => real.some((n) => types.includes(n.type));
+
+    if (has("money")) add("money", "money");
+    if (has("percent", "basisPoints")) add("percent", "percent");
+    if (has("perShare")) add("perShare", "per share");
+    // The word-by-word check only runs if a change word appears at all (most rows have none).
+    if (CHANGE_TEST.test(text)) {
+      const words = wordsOf(text);
+      if (real.some((n) => CHANGEABLE.has(n.type) && nearChangeWord(words, n))) add("changeWord", "change word");
+    }
+    if (FINANCE_TERM.test(text)) add("financeTerm", "finance term");
+    const headerPeriod = (context.headerNumbers || []).some((n) => !n.junk && PERIOD_LIKE.has(n.type));
+    if (has("period") || headerPeriod) add("period", "period");
+    if (COMPARISON.test(text)) add("comparison", "comparison");
+    // Rows with column headers already get the period point from them, so being in a table
+    // only counts for rows without headers.
+    const tableBonus = context.inTable && !context.hasHeaders;
+    if (tableBonus || context.bold || context.underNumberHeading) {
+      add("context", context.bold ? "bold" : context.underNumberHeading ? "under number heading" : "in table");
+    }
+    if (has("multiple")) add("multiple", "multiple");
+
+    // Recency: compared with the page's newest year (capped at the current year; see
+    // pageYear), not today's date, so older articles aren't penalised for their age. Skipped
+    // when the unit names a current period ("Q3", "the third quarter") or has no explicit year.
+    const unitYear = newestYear(real);
+    if (context.pageNewestYear && unitYear && !hasCurrentPeriod(real)) {
+      const age = context.pageNewestYear - unitYear;
+      if (age >= RECENCY_OLD_YEARS) add("recencyOld", `${age} years older than the page`);
+      else if (age >= RECENCY_DATED_YEARS) add("recencyDated", `${age} years older than the page`);
+    }
+
+    if (numbers.length && !real.length) add("onlyJunk", "only junk");
+    else if (real.length && !real.some((n) => KEY_TYPES.has(n.type)) && has("count", "year")) {
+      add("onlyCounts", "only counts/years");
+    }
+    if (wordCount(text) > RAMBLING_WORDS) add("rambling", "over 60 words");
+    return { score, reasons };
+  }
+
+  // Figures for spotting the same number twice. Money and per-share figures compare by
+  // significant digits, so "$46,743" in a table "(in millions)" matches "$46.7 billion" in
+  // prose; a 0.5% tolerance absorbs that rounding (money only).
+  const FIGURE_TOLERANCE = 0.005;
+  function keyFigures(numbers) {
+    const figures = [];
+    for (const n of numbers) {
+      if (n.junk || typeof n.value !== "number" || n.value === 0) continue;
+      const v = Math.abs(n.value);
+      if (n.type === "money" || n.type === "perShare") {
+        figures.push({ group: "money", digits: v / 10 ** Math.floor(Math.log10(v)) });
+      } else if (n.type === "percent" || n.type === "basisPoints") {
+        figures.push({ group: n.type, digits: v });
+      }
+    }
+    return figures;
+  }
+  // A unit's main figure: its first money figure, else its first percentage.
+  const mainFigure = (figures) => figures.find((f) => f.group === "money") || figures[0] || null;
+  // Only money gets the rounding tolerance; percentages are stated exactly ("35.1%" isn't "35%").
+  const sameFigure = (a, b) =>
+    a.group === b.group &&
+    Math.abs(a.digits - b.digits) <= (a.group === "money" ? b.digits * FIGURE_TOLERANCE : 1e-9);
+
+  // Explicit years in a unit's numbers: years, year ranges, dated periods ("fiscal 2026",
+  // "Q3 2025") and dates ("March 31, 2026"). Junk (copyright years) never counts.
+  const YEAR_IN_TEXT = /\b(?:19|20)\d{2}\b/g;
+  function yearsOf(n) {
+    if (n.junk) return [];
+    if (n.type === "year") return [n.value, n.low, n.high].filter((y) => typeof y === "number");
+    if (n.type === "period") return n.decade || typeof n.value !== "number" ? [] : [n.value];
+    if (n.type === "date") return (n.raw.match(YEAR_IN_TEXT) || []).map(Number);
+    return [];
+  }
+  function newestYear(numbers) {
+    const years = numbers.flatMap(yearsOf);
+    return years.length ? Math.max(...years) : null;
+  }
+  // The page's reference year for recency: its newest explicit year, but never later than
+  // the current year, so forward-looking mentions ("by 2031") don't make today's figures
+  // look old. currentYear is injectable for deterministic tests.
+  function pageYear(numbers, currentYear = new Date().getFullYear()) {
+    const newest = newestYear(numbers);
+    return newest == null ? null : Math.min(newest, currentYear);
+  }
+  // A period with no year of its own ("Q3", "the third quarter", "H1"), but not the
+  // year-over-year style markers, which say nothing about when.
+  const hasCurrentPeriod = (numbers) =>
+    numbers.some(
+      (n) => n.type === "period" && n.value == null && !n.decade &&
+        !/year|over|sequential|yoy|qoq|[yq]\/[yq]/i.test(n.raw)
+    );
+
+  // The company's own forward-looking statements are guidance; analysts' and the market's
+  // expectations are growth/estimates. Returns null when neither applies.
+  const ANALYST_LANGUAGE = /\b(?:analysts?|consensus|estimates?|expectations?|Wall Street|the Street|forecasters?|economists?)\b/i;
+  const FORWARD_CUE = /\b(?:expects?|expected|expecting|anticipates?|anticipated|forecasts?|forecasted|projects?|projected|outlook|guidance|guides?)\b|\bnext (?:quarter|year)\b/i;
+  // "Lilypad expects", "the company anticipates", "is raising its full-year guidance".
+  const COMPANY_FORWARD = /\b(?:the company|company|we|management|the board|[A-Z][A-Za-z.&'-]+(?:\s+(?:Holdings|Inc\.?|Corp\.?|Corporation|Group|Platforms))?)\s+(?:now\s+|still\s+|also\s+)?(?:expects|anticipates|forecasts|projects|guides|raised its (?:\w+\s+)?(?:guidance|outlook|forecast)|is raising its (?:[\w-]+\s+){0,3}(?:guidance|outlook|forecast))\b/;
+  // "outlook for Q4", "full-year guidance", "fiscal 2027 outlook", "next quarter".
+  const PERIOD_FORWARD = /\b(?:outlook|guidance|forecast)\s+(?:for|of)\s+(?:the\s+)?(?:fourth|third|second|first|next|coming|full[\s-]year|fiscal|current|Q[1-4]|\d{4})|\b(?:full[\s-]year|annual|fiscal(?:\s+(?:year\s+)?\d{4})?|quarterly|next[\s-]quarter|\d{4})(?:\s+[\w-]+){0,2}\s+(?:guidance|outlook|forecast)\b|\bnext (?:quarter|year|fiscal year)\b/i;
+  // A passive "is expected to" counts only with a company metric ("Revenue is expected to
+  // be $54.0 billion"), not for the economy ("GDP growth is expected to be robust").
+  const PASSIVE_FORWARD = /\b(?:is|are) expected to\b/i;
+  const COMPANY_METRIC = /\b(?:revenues?|sales|margins?|EPS|earnings per share|operating (?:income|expenses?)|net income|gross profit|capital expenditures?|capex|cash flow|dividends?|buybacks?)\b/i;
+
+  function forwardTopic(text) {
+    if (!FORWARD_CUE.test(text)) return null;
+    if (ANALYST_LANGUAGE.test(text)) return "growth/estimates";
+    if (COMPANY_FORWARD.test(text) || PERIOD_FORWARD.test(text)) return "guidance/outlook/forecast";
+    if (PASSIVE_FORWARD.test(text) && COMPANY_METRIC.test(text)) return "guidance/outlook/forecast";
+    return null;
+  }
+
+  // A unit's topic: guidance or growth/estimates for forward-looking statements (above),
+  // otherwise the topic of its earliest finance term, or "other".
+  function topicOf(text) {
+    const forward = forwardTopic(text);
+    if (forward) return forward;
+    let best = null;
+    WEIGHTS.topics.forEach(([name, re], rank) => {
+      const m = re.exec(text);
+      if (m && (!best || m.index < best.index || (m.index === best.index && rank < best.rank))) {
+        best = { name, index: m.index, rank };
+      }
+    });
+    return best ? best.name : "other";
+  }
+
+  const positiveSignals = (unit) => (unit.reasons || []).filter((r) => / \+\d+$/.test(r)).length;
+
+  // Ties: prose sentences before table rows, then more distinct positive signals, then page order.
+  const rankOrder = (a, b, scoreA = a.score, scoreB = b.score) =>
+    scoreB - scoreA ||
+    (a.kind === "row") - (b.kind === "row") ||
+    positiveSignals(b) - positiveSignals(a) ||
+    a.order - b.order;
+
+  // Choose targets from scored units ({ score, numbers, group, table, order, words, kind }).
+  // Highest scores first (see rankOrder for ties). A unit whose main figure is already picked
+  // loses WEIGHTS.duplicate, and one whose topic is already covered loses WEIGHTS.topicCovered
+  // for selection; either way it goes back in the queue to compete at the lower score.
+  // Spread limits per block and per table; the result is in page order (the frog only hops down).
+  function pickTargets(units, options = {}) {
+    const totalWords = options.totalWords ?? units.reduce((sum, u) => sum + (u.words || 0), 0);
+    const passing = units.filter((u) => u.score >= MIN_SCORE);
+    let wanted = Math.min(MAX_TARGETS, Math.max(MIN_TARGETS, Math.round(totalWords / WORDS_PER_TARGET)));
+    if (passing.length >= MIN_TARGETS_WHEN_RICH) wanted = Math.max(wanted, MIN_TARGETS_WHEN_RICH);
+    const ranked = passing.sort((a, b) => rankOrder(a, b));
+
+    const chosen = [];
+    const seen = []; // key figures of everything picked so far
+    const perBlock = new Map();
+    const perTable = new Map();
+    const topicCounts = new Map(); // topic -> how many chosen units cover it
+    const rowTopics = new Set(); // named topics that already have a table row chosen
+    const queue = ranked.map((unit) => ({
+      unit,
+      score: unit.score,
+      penalised: false,
+      topicPenalty: 0,
+      topic: (unit.topic = topicOf(unit.text)),
+    }));
+    const byScore = (a, b) => rankOrder(a.unit, b.unit, a.score, b.score);
+    const requeue = (entry) => {
+      if (entry.score >= MIN_SCORE) {
+        queue.push(entry);
+        queue.sort(byScore);
+      }
+    };
+    while (queue.length && chosen.length < wanted) {
+      const entry = queue.shift();
+      const { unit } = entry;
+      if ((perBlock.get(unit.group) || 0) >= MAX_PER_BLOCK) continue;
+      if (unit.table != null && (perTable.get(unit.table) || 0) >= MAX_ROWS_PER_TABLE) continue;
+      const figures = keyFigures(unit.numbers || []);
+      const main = mainFigure(figures);
+      if (!entry.penalised && main && seen.some((f) => sameFigure(main, f))) {
+        // Its main figure is already covered: knock it down and let it compete again at the
+        // lower score, rather than picking it ahead of units that are now better.
+        entry.score += WEIGHTS.duplicate;
+        entry.penalised = true;
+        unit.reasons = [...(unit.reasons || []), `duplicate figure ${WEIGHTS.duplicate}`];
+        requeue(entry);
+        continue;
+      }
+      // Variety: WEIGHTS.topicCovered for each chosen unit already on this topic ("other"
+      // included). The first table row on a named topic is exempt, so a headline row (an
+      // infobox "Revenue") isn't crowded out by sentences. Selection only: never in the
+      // displayed score, and never a reason to drop below MIN_SCORE; it reorders the queue.
+      const covered = topicCounts.get(entry.topic) || 0;
+      const exempt = unit.kind === "row" && entry.topic !== "other" && !rowTopics.has(entry.topic);
+      const penalty = covered && !exempt ? WEIGHTS.topicCovered * covered : 0;
+      if (penalty !== entry.topicPenalty) {
+        entry.score += penalty - entry.topicPenalty;
+        entry.topicPenalty = penalty;
+        unit.reasons = [
+          ...(unit.reasons || []).filter((r) => !r.startsWith("topic already covered")),
+          ...(penalty ? [`topic already covered ${penalty}`] : []),
+        ];
+        queue.push(entry);
+        queue.sort(byScore);
+        continue;
+      }
+      unit.finalScore = unit.score + (entry.penalised ? WEIGHTS.duplicate : 0);
+      chosen.push(unit);
+      topicCounts.set(entry.topic, covered + 1);
+      if (unit.kind === "row" && entry.topic !== "other") rowTopics.add(entry.topic);
+      seen.push(...figures);
+      perBlock.set(unit.group, (perBlock.get(unit.group) || 0) + 1);
+      if (unit.table != null) perTable.set(unit.table, (perTable.get(unit.table) || 0) + 1);
+    }
+    for (const entry of queue) if (entry.penalised) entry.unit.finalScore = entry.unit.score + WEIGHTS.duplicate;
+    return chosen.sort((a, b) => a.order - b.order);
+  }
+
+  // Score every unit and pick targets. Units come from FrogbotExtract.buildUnits():
+  // { text, kind: "sentence" | "row", headers, context, group, table, order }.
+  // options: { totalWords, currentYear } (currentYear defaults to today's; set it in tests).
+  // Adds numbers / score / reasons / chosen to each unit and returns { units, chosen }.
+  function rankUnits(units, options = {}) {
+    for (const unit of units) {
+      // Rows arrive with their numbers already detected cell by cell (see buildUnits).
+      unit.numbers = unit.numbers || detectNumbers(unit.text, { inTable: unit.kind === "row" });
+    }
+    // The page's reference year for the recency penalty (options.currentYear for tests).
+    const pageNewestYear = pageYear(units.flatMap((u) => u.numbers), options.currentYear);
+    for (const unit of units) {      const headerNumbers = (unit.headers || []).flatMap((h) => detectNumbers(h));
+      const hasHeaders = (unit.headers || []).length > 0;
+      const { score, reasons } = scoreUnit(unit, unit.numbers, {
+        ...unit.context,
+        headerNumbers,
+        hasHeaders,
+        pageNewestYear,
+      });
+      unit.score = score;
+      unit.reasons = reasons;
+      unit.words = wordCount(unit.text);
+      unit.chosen = false;
+    }
+    const chosen = pickTargets(units, options);
+    for (const unit of chosen) unit.chosen = true;
+    return { units, chosen };
+  }
+
+  // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
@@ -590,8 +954,23 @@
     if (end > start) sentences.push({ text: text.slice(start, end), start, end });
   }
 
+  // Results are cached by text: scoring runs the same column headers and cell values
+  // through detection many times. Treat the returned arrays as read-only.
+  const detectCache = new Map();
+  const DETECT_CACHE_SIZE = 5000;
+
   // options.inTable: the text is a table cell, where bracketed amounts are always negative.
   function detectNumbers(text, options = {}) {
+    const key = (options.inTable ? "T|" : "P|") + text;
+    const cached = detectCache.get(key);
+    if (cached) return cached;
+    const result = detectNumbersUncached(text, options);
+    if (detectCache.size >= DETECT_CACHE_SIZE) detectCache.clear();
+    detectCache.set(key, result);
+    return result;
+  }
+
+  function detectNumbersUncached(text, options) {
     if (!text || !/\d|year|quarter|half|sequential|yoy|qoq|[yq]\/[yq]/i.test(text)) return [];
     const taken = [];
     const free = (s, e) => taken.every(([ts, te]) => e <= ts || s >= te);
@@ -641,7 +1020,17 @@
     return merged;
   }
 
-  const FrogbotScore = { splitSentences, detectNumbers };
+  const FrogbotScore = {
+    splitSentences,
+    detectNumbers,
+    scoreUnit,
+    pickTargets,
+    rankUnits,
+    topicOf,
+    pageYear,
+    WEIGHTS,
+    MIN_SCORE,
+  };
   if (typeof window !== "undefined" && !window.FrogbotScore) window.FrogbotScore = FrogbotScore;
   if (typeof module !== "undefined" && module.exports) module.exports = FrogbotScore;
 })();

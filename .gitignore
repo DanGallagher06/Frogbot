@@ -10,3 +10,6 @@ desktop.ini
 
 # Saved copies of real web pages for local testing (not ours to redistribute)
 test-pages/local/
+
+# Python bytecode from the tools/ scripts
+__pycache__/

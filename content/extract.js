@@ -405,5 +405,165 @@
     return blocks;
   }
 
-  window.FrogbotExtract = { findMainContainer, getBlocks };
+  // ---------------------------------------------------------------------------
+  // Scoring units (step 8): prose sentences and table rows, ready for FrogbotScore.rankUnits()
+  // ---------------------------------------------------------------------------
+
+  const PROSE_TYPES = new Set(["paragraph", "list", "quote"]);
+  const NOT_FIGURES = new Set(["period", "year", "date"]);
+  // Citation markers only need stripping when there's a "[" (most cells have none).
+  const cellText = (cell) => {
+    const raw = cell.textContent;
+    return collapse(raw.includes("[") ? raw.replace(MARKERS, "") : raw);
+  };
+
+  // One entry per column, with colspans expanded.
+  function expandRow(tr) {
+    const cols = [];
+    for (const cell of tr.cells) for (let i = 0; i < Math.max(1, cell.colSpan || 1); i++) cols.push(cell);
+    return cols;
+  }
+
+  // A table's column-header row: the last <thead> row, else the first row of <th> cells,
+  // else an early row whose cells are mostly periods ("Q3 2026", "FY25").
+  function headerRowOf(table, score) {
+    if (table.tHead && table.tHead.rows.length) return table.tHead.rows[table.tHead.rows.length - 1];
+    const early = [...table.rows].slice(0, 4);
+    const allTh = early.find((r) => r.cells.length >= 2 && [...r.cells].every((c) => c.tagName === "TH"));
+    if (allTh) return allTh;
+    const periodRow = early.find((r) => {
+      const texts = [...r.cells].map(cellText).filter(Boolean);
+      if (texts.length < 2) return false;
+      const periods = texts.filter((t) =>
+        score.detectNumbers(t).some((n) => !n.junk && NOT_FIGURES.has(n.type))
+      ).length;
+      return periods >= Math.ceil(texts.length / 2);
+    });
+    return periodRow || null;
+  }
+
+  // Units for scoring, in page order:
+  // - each sentence of a paragraph, list item or quote
+  // - each table row with at least one extracted figure cell, its cells joined with " | ",
+  //   plus the column headers above its figures; the hop target is its first figure cell
+  // Headings aren't units, but a heading with a number marks the sentences under it.
+  // `score` is FrogbotScore (passed in because extract.js loads first).
+  function buildUnits(blocks, score) {
+    const units = [];
+    const rowUnits = new Map(); // tr -> unit (or null for header/figureless rows)
+    const headerRows = new Map(); // table -> { row, texts }
+    // Cells holding extracted blocks, by row, so a row's target is something the frog read.
+    const blockCells = new Map(); // tr -> Set of cells
+    for (const b of blocks) {
+      const cell = b.type === "table" && b.element.closest("td, th");
+      if (!cell) continue;
+      if (!blockCells.has(cell.parentElement)) blockCells.set(cell.parentElement, new Set());
+      blockCells.get(cell.parentElement).add(cell);
+    }
+    let headingHasNumber = false;
+
+    for (const block of blocks) {
+      if (block.type === "heading") {
+        headingHasNumber = score.detectNumbers(block.text).some((n) => !n.junk);
+        continue;
+      }
+
+      const tr = block.type === "table" ? block.element.closest("tr") : null;
+      if (tr) {
+        if (rowUnits.has(tr)) {
+          const unit = rowUnits.get(tr);
+          if (unit) unit.blockIndexes.push(block.index);
+          continue;
+        }
+        const unit = rowUnit(tr, block, blockCells.get(tr) || new Set(), score, headerRows);
+        rowUnits.set(tr, unit);
+        if (unit) units.push(unit);
+        continue;
+      }
+
+      if (!PROSE_TYPES.has(block.type) && block.type !== "table") continue;
+      const bold = [...block.element.querySelectorAll("b, strong")]
+        .map(cellText)
+        .filter((t) => t.length >= 10);
+      score.splitSentences(block.text).forEach((sentence, i) => {
+        units.push({
+          kind: "sentence",
+          text: sentence.text,
+          sentence: { start: sentence.start, end: sentence.end },
+          element: block.element,
+          highlight: block.element,
+          group: block.index,
+          table: null,
+          order: block.index + i / 1000,
+          blockIndexes: [block.index],
+          context: {
+            inTable: block.type === "table",
+            bold: bold.some((b) => sentence.text.includes(b) || b.includes(sentence.text)),
+            underNumberHeading: headingHasNumber,
+          },
+        });
+      });
+    }
+    return units;
+  }
+
+  function rowUnit(tr, firstBlock, cellsWithBlocks, score, headerRows) {
+    const table = tr.closest("table");
+    if (!table) return null;
+    // Per table, once: the header row and its column texts (colspans expanded).
+    if (!headerRows.has(table)) {
+      const row = headerRowOf(table, score);
+      headerRows.set(table, { row, texts: row ? expandRow(row).map(cellText) : [] });
+    }
+    const header = headerRows.get(table);
+    if (tr === header.row || tr.parentElement.tagName === "THEAD") return null;
+
+    // The row's cells joined with " | " (which never joins two numbers into a range), run
+    // through detection once; each number is mapped back to its cell by position. One call
+    // per row instead of one per cell matters on big financial tables.
+    const parts = [];
+    const spans = []; // [start, end, cell]
+    let offset = 0;
+    for (const cell of tr.cells) {
+      const text = cellText(cell);
+      if (!text) continue;
+      if (parts.length) offset += 3; // " | "
+      spans.push([offset, offset + text.length, cell]);
+      parts.push(text);
+      offset += text.length;
+    }
+    const rowText = parts.join(" | ");
+    const numbers = score.detectNumbers(rowText, { inTable: true });
+    const figureCells = [];
+    for (const n of numbers) {
+      if (n.junk || NOT_FIGURES.has(n.type)) continue;
+      const span = spans.find(([start, end]) => n.start >= start && n.start < end);
+      if (span && !figureCells.includes(span[2])) figureCells.push(span[2]);
+    }
+    const target = figureCells.find((c) => cellsWithBlocks.has(c));
+    if (!target) return null;
+
+    const headers = [];
+    if (header.texts.length) {
+      expandRow(tr).forEach((cell, i) => {
+        const text = header.texts[i];
+        if (text && figureCells.includes(cell) && !headers.includes(text)) headers.push(text);
+      });
+    }
+    return {
+      kind: "row",
+      text: rowText,
+      numbers,
+      headers,
+      element: target,
+      highlight: tr,
+      group: `row:${firstBlock.index}`,
+      table,
+      order: firstBlock.index,
+      blockIndexes: [firstBlock.index],
+      context: { inTable: true },
+    };
+  }
+
+  window.FrogbotExtract = { findMainContainer, getBlocks, buildUnits };
 })();

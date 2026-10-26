@@ -10,8 +10,6 @@
   if (!Frogbot || !Highlight || !Extract || !Score || Frogbot.isShowing()) return;
 
   const debug = window.__frogbotDebug === true;
-  const MAX_TARGETS = 4;
-  const MIN_TARGET_CHARS = 80;
   const FROG_SIZE = 60;
   const START_CLEARANCE = 10; // gap between the frog's bottom edge and the first block
   const MAX_ABOVE_CONTAINER = 80; // how far above the main container the frog may start
@@ -43,25 +41,33 @@
     bottom: spot.y + FROG_SIZE / 2,
   });
 
-  // Test pages mark targets explicitly. Elsewhere, the first few substantial
-  // paragraphs (temporary until scoring arrives in step 8).
-  function findTargets(blocks) {
-    const marked = [...document.querySelectorAll("[data-frogbot-target]")];
-    if (marked.length) {
-      return marked.sort(
-        (a, b) => Number(a.dataset.frogbotTarget) - Number(b.dataset.frogbotTarget)
-      );
+  // Score sentences and table rows, pick the best, and turn them into hop targets:
+  // one per block or table row, in page order. Each target keeps the units (sentences or
+  // row) it was chosen for, for exact-number highlighting later.
+  function scoreAndPick(blocks) {
+    const started = performance.now();
+    const units = Extract.buildUnits(blocks, Score);
+    const totalWords = blocks.reduce((sum, b) => sum + b.text.split(/\s+/).length, 0);
+    const { chosen } = Score.rankUnits(units, { totalWords });
+    const byElement = new Map();
+    for (const unit of chosen) {
+      if (!byElement.has(unit.element)) {
+        byElement.set(unit.element, { element: unit.element, highlight: unit.highlight, units: [] });
+      }
+      byElement.get(unit.element).units.push(unit);
     }
-    return blocks
-      // Figcaptions are typed "paragraph" too, but image captions make poor targets.
-      .filter(
-        (b) =>
-          b.type === "paragraph" &&
-          b.element.tagName !== "FIGCAPTION" &&
-          b.text.length >= MIN_TARGET_CHARS
-      )
-      .slice(0, MAX_TARGETS)
-      .map((b) => b.element);
+    return { units, targets: [...byElement.values()], ms: performance.now() - started };
+  }
+
+  // With ?frogbot-fixed in the URL, test pages use their hand-placed data-frogbot-target
+  // elements instead of scoring (handy for checking the hop animation on its own).
+  function fixedTargets() {
+    if (!new URLSearchParams(location.search).has("frogbot-fixed")) return null;
+    const marked = [...document.querySelectorAll("[data-frogbot-target]")];
+    if (!marked.length) return null;
+    return marked
+      .sort((a, b) => Number(a.dataset.frogbotTarget) - Number(b.dataset.frogbotTarget))
+      .map((el) => ({ element: el, highlight: el, units: [] }));
   }
 
   // ---- Start position ----
@@ -180,9 +186,23 @@
     document.documentElement.appendChild(box);
   }
 
-  function showDebug(container, blocks, ms) {
+  function showDebug(container, blocks, ms, scoring) {
     addDebugBox(container, "frogbot-debug-container", "main container");
-    for (const b of blocks) addDebugBox(b.element, `frogbot-debug-${b.type}`, `${b.index} ${b.type}`);
+    // Each block's best unit score; chosen targets get a solid outline.
+    const best = new Map();
+    for (const unit of scoring.units) {
+      for (const i of unit.blockIndexes) best.set(i, Math.max(best.get(i) ?? -Infinity, unit.score));
+    }
+    const chosenElements = new Set(scoring.targets.map((t) => t.element));
+    for (const b of blocks) {
+      const chosen = chosenElements.has(b.element) || [...chosenElements].some((el) => el.contains(b.element));
+      const score = best.has(b.index) ? ` · ${best.get(b.index)}` : "";
+      addDebugBox(
+        b.element,
+        `frogbot-debug-${b.type}${chosen ? " frogbot-debug-chosen" : ""}`,
+        `${b.index} ${b.type}${score}`
+      );
+    }
     console.table(
       blocks.map((b) => ({
         index: b.index,
@@ -193,6 +213,18 @@
     );
     console.log(`Frogbot: extracted ${blocks.length} blocks in ${ms.toFixed(1)} ms`, container);
     logNumbers(blocks);
+    console.table(
+      scoring.units.map((u, index) => ({
+        index,
+        score: u.finalScore ?? u.score,
+        chosen: u.chosen ? "yes" : "no",
+        reasons: u.reasons.join(", "),
+        text: u.text.slice(0, 80),
+      }))
+    );
+    console.log(
+      `Frogbot: scored ${scoring.units.length} units and chose ${scoring.targets.length} targets in ${scoring.ms.toFixed(1)} ms`
+    );
   }
 
   // Debug only: what detectNumbers finds across the page (no visual changes yet).
@@ -237,11 +269,12 @@
     await sleep(500);
     for (const target of targets) {
       if (cancelled) return;
-      await Frogbot.hopTo(target);
+      await Frogbot.hopTo(target.element);
       if (cancelled) return;
       await sleep(200);
       if (cancelled) return;
-      await Frogbot.tongueTo(target, Highlight.mark);
+      // Whole block (or whole table row) for now; exact numbers come in step 9.
+      await Frogbot.tongueTo(target.element, () => Highlight.mark(target.highlight));
       if (cancelled) return;
       await sleep(400);
     }
@@ -259,8 +292,11 @@
   const blocks = Extract.getBlocks(container);
   const extractMs = performance.now() - started;
 
+  const scoring = scoreAndPick(blocks);
+  const targets = fixedTargets() || scoring.targets;
+
   Frogbot.show(startPosition(container, blocks));
-  if (debug) showDebug(container, blocks, extractMs);
+  if (debug) showDebug(container, blocks, extractMs, scoring);
 
   document.addEventListener("keydown", onKeyDown, true);
   // Runs on any remove(), so nothing outlives the frog. Debug boxes are
@@ -271,7 +307,7 @@
     Highlight.clearAll();
   });
 
-  run(blocks.length ? findTargets(blocks) : []).catch((error) => {
+  run(targets).catch((error) => {
     // Removing the frog mid-animation rejects with AbortError; that's expected.
     if (!cancelled && error.name !== "AbortError") console.error("Frogbot:", error);
   });

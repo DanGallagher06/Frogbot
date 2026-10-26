@@ -1,0 +1,32 @@
+[
+  {
+    "index": 2,
+    "score": 12,
+    "kind": "sentence",
+    "text": "Revenue rose to $482.6 million, up 14.2% year over year, driven by strong demand"
+  },
+  {
+    "index": 15,
+    "score": 9,
+    "kind": "row",
+    "text": "Gross profit | $209.9 | $176.2 | +19.1%"
+  },
+  {
+    "index": 17,
+    "score": 9,
+    "kind": "row",
+    "text": "Operating income | $84.0 | $66.3 | +26.7%"
+  },
+  {
+    "index": 18,
+    "score": 9,
+    "kind": "row",
+    "text": "Net income | $61.3 | $47.9 | +28.0%"
+  },
+  {
+    "index": 24,
+    "score": 10,
+    "kind": "sentence",
+    "text": "For the fourth quarter of 2026, Lilypad expects revenue between $505 million and"
+  }
+]

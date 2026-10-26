@@ -127,6 +127,12 @@
 .frogbot-debug-heading { --frogbot-debug-colour: #8e44ad; }
 .frogbot-debug-quote { --frogbot-debug-colour: #e67e22; }
 
+/* Chosen targets: solid instead of dashed. */
+.frogbot-debug-box.frogbot-debug-chosen {
+  border-style: solid !important;
+  border-width: 2px !important;
+}
+
 .frogbot-debug-container {
   z-index: 2147482989 !important;
   border: 2px solid #e53935 !important;
