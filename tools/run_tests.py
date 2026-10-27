@@ -1,6 +1,6 @@
 """Run tests/run-tests.html in headless Edge or Chrome and print the results for the
-development set (tests/detect-cases.js), the scoring cases (tests/score-cases.js) and the
-held-out set (tests/holdout-cases.js).
+development set (tests/detect-cases.js), the scoring cases (tests/score-cases.js), the
+fact cases (tests/facts-cases.js) and the held-out set (tests/holdout-cases.js).
 
 Usage (from anywhere):  python tools/run_tests.py
 Set FROGBOT_BROWSER to a browser executable to override the automatic search.
@@ -60,6 +60,8 @@ def main() -> None:
     print()
     failed |= report_scoring(results["scoring"])
     print()
+    failed |= report_facts(results["facts"])
+    print()
     held_out = results["holdout"]
     if held_out["summary"]["total"] == 0:
         print("Held-out set (tests/holdout-cases.js)")
@@ -68,6 +70,25 @@ def main() -> None:
         failed |= report("Held-out set (tests/holdout-cases.js)", held_out)
     if failed:
         sys.exit(1)
+
+
+def report_facts(results: dict) -> bool:
+    """Print the fact cases' summary and failures. Returns True if any failed."""
+    s = results["summary"]
+    title = "Facts (tests/facts-cases.js)"
+    print(title)
+    print("=" * len(title))
+    print(f"Accuracy: {s['accuracy']}%  ({s['passed']} of {s['total']} cases pass, {s['failed']} failed)")
+    if results["failures"]:
+        print()
+        print("Failures:")
+        for f in results["failures"]:
+            print(f"- {f['text'][:140]}")
+            for p in f["problems"]:
+                print(f"    {p}")
+            for g in f["got"]:
+                print(f"    got: {g}")
+    return bool(results["failures"])
 
 
 def report_scoring(results: dict) -> bool:

@@ -411,9 +411,16 @@
 
   const PROSE_TYPES = new Set(["paragraph", "list", "quote"]);
   const NOT_FIGURES = new Set(["period", "year", "date"]);
-  // Citation markers only need stripping when there's a "[" (most cells have none).
+  // Citation markers only need stripping when there's a "[" (most cells have none). Inline
+  // <style>/<script> (Wikipedia's TemplateStyles) isn't text.
   const cellText = (cell) => {
-    const raw = cell.textContent;
+    let raw = cell.textContent;
+    if (cell.querySelector && cell.querySelector("style, script")) {
+      raw = [...cell.childNodes]
+        .filter((n) => !(n.nodeType === 1 && /^(?:STYLE|SCRIPT)$/.test(n.tagName)))
+        .map((n) => (n.nodeType === 1 ? cellText(n) : n.textContent))
+        .join("");
+    }
     return collapse(raw.includes("[") ? raw.replace(MARKERS, "") : raw);
   };
 
@@ -426,6 +433,16 @@
 
   // A table's column-header row: the last <thead> row, else the first row of <th> cells,
   // else an early row whose cells are mostly periods ("Q3 2026", "FY25").
+  // A cell's first column index, with colspans counted.
+  function columnOf(tr, cell) {
+    let col = 0;
+    for (const c of tr.cells) {
+      if (c === cell) return col;
+      col += Math.max(1, c.colSpan || 1);
+    }
+    return -1;
+  }
+
   function headerRowOf(table, score) {
     if (table.tHead && table.tHead.rows.length) return table.tHead.rows[table.tHead.rows.length - 1];
     const early = [...table.rows].slice(0, 4);
@@ -446,6 +463,35 @@
   // - each sentence of a paragraph, list item or quote
   // - each table row with at least one extracted figure cell, its cells joined with " | ",
   //   plus the column headers above its figures; the hop target is its first figure cell
+  // Some pages mark section names with a bold paragraph instead of a heading tag
+  // ("<p><strong>Data Center</strong></p>" above a list on Nvidia's releases). Only used
+  // for fact labels, so it doesn't change scoring.
+  function boldHeadingBefore(block) {
+    if (block.type === "table") return null;
+    const start = block.type === "list" ? block.element.closest("ul, ol") || block.element : block.element;
+    const prev = start.previousElementSibling;
+    if (!prev || !/^(?:P|DIV)$/.test(prev.tagName) || prev.children.length !== 1) return null;
+    const bold = prev.children[0];
+    if (!/^(?:STRONG|B)$/.test(bold.tagName)) return null;
+    const text = collapse(prev.textContent);
+    if (text !== collapse(bold.textContent) || !text || text.length > 40) return null;
+    if (text.split(" ").length > 5 || /\d|[.:!?]$/.test(text)) return null;
+    return text;
+  }
+
+  // The paragraph or line directly before a list item's list, which introduces it
+  // ("NVIDIA's outlook for the third quarter of fiscal 2026 is as follows:"). Not a
+  // bold-paragraph heading (those count as headings). Only used for fact periods.
+  function listIntroOf(block) {
+    if (block.type !== "list") return null;
+    const list = block.element.closest("ul, ol");
+    const prev = list && list.previousElementSibling;
+    if (!prev || !/^(?:P|DIV)$/.test(prev.tagName)) return null;
+    if (boldHeadingBefore({ type: "paragraph", element: list })) return null;
+    const text = cellText(prev);
+    return text && text.length <= 400 ? text : null;
+  }
+
   // Headings aren't units, but a heading with a number marks the sentences under it.
   // `score` is FrogbotScore (passed in because extract.js loads first).
   function buildUnits(blocks, score) {
@@ -461,12 +507,21 @@
       blockCells.get(cell.parentElement).add(cell);
     }
     let headingHasNumber = false;
+    let heading = null; // text of the latest heading, for facts (a segment name or a period)
+    // The page's <h1> (a release's title): a period source for facts in the blocks after it,
+    // until the first heading. Never a segment name.
+    const h1 = typeof document !== "undefined" ? document.querySelector("h1") : null;
+    const h1Text = h1 ? cellText(h1) : "";
+    const titleFor = (block) =>
+      !heading && h1Text && h1.compareDocumentPosition(block.element) & Node.DOCUMENT_POSITION_FOLLOWING ? h1Text : null;
 
     for (const block of blocks) {
       if (block.type === "heading") {
         headingHasNumber = score.detectNumbers(block.text).some((n) => !n.junk);
+        heading = block.text;
         continue;
       }
+      heading = boldHeadingBefore(block) || heading;
 
       const tr = block.type === "table" ? block.element.closest("tr") : null;
       if (tr) {
@@ -477,7 +532,11 @@
         }
         const unit = rowUnit(tr, block, blockCells.get(tr) || new Set(), score, headerRows);
         rowUnits.set(tr, unit);
-        if (unit) units.push(unit);
+        if (unit) {
+          unit.heading = heading;
+          unit.pageTitle = titleFor(block);
+          units.push(unit);
+        }
         continue;
       }
 
@@ -485,12 +544,16 @@
       const bold = [...block.element.querySelectorAll("b, strong")]
         .map(cellText)
         .filter((t) => t.length >= 10);
+      const listIntro = listIntroOf(block);
       score.splitSentences(block.text).forEach((sentence, i) => {
         units.push({
           kind: "sentence",
           text: sentence.text,
           sentence: { start: sentence.start, end: sentence.end },
           blockText: block.text,
+          heading,
+          pageTitle: titleFor(block),
+          listIntro,
           element: block.element,
           highlight: block.element,
           group: block.index,
@@ -511,10 +574,21 @@
   function rowUnit(tr, firstBlock, cellsWithBlocks, score, headerRows) {
     const table = tr.closest("table");
     if (!table) return null;
-    // Per table, once: the header row and its column texts (colspans expanded).
+    // Per table, once: the header row and its column texts (colspans expanded), plus the
+    // table's title (its caption, or one-cell rows above the headers, like Nvidia's "GAAP" /
+    // "Non-GAAP") and its units ("($ in millions, except per share data)").
     if (!headerRows.has(table)) {
       const row = headerRowOf(table, score);
-      headerRows.set(table, { row, texts: row ? expandRow(row).map(cellText) : [] });
+      const titleRows = [];
+      for (const r of table.rows) {
+        if (r === row) break;
+        const texts = [...r.cells].map(cellText).filter(Boolean);
+        if (texts.length === 1) titleRows.push(texts[0]);
+      }
+      const title = [table.caption ? cellText(table.caption) : "", ...titleRows].filter(Boolean).join(" ");
+      const texts = row ? expandRow(row).map(cellText) : [];
+      const units = `${title} ${texts.join(" ")}`.match(/\bin (thousands|millions|billions)\b/i);
+      headerRows.set(table, { row, texts, title, scale: units ? units[1].toLowerCase().replace(/s$/, "") : null });
     }
     const header = headerRows.get(table);
     if (tr === header.row || tr.parentElement.tagName === "THEAD") return null;
@@ -554,7 +628,15 @@
     return {
       kind: "row",
       text: rowText,
-      cells: spans.map(([start, end, cell, text]) => ({ start, end, element: cell, text })),
+      cells: spans.map(([start, end, cell, text]) => ({
+        start,
+        end,
+        element: cell,
+        text,
+        header: header.texts[columnOf(tr, cell)] || null, // the column header above this cell
+      })),
+      tableTitle: header.title,
+      tableScale: header.scale, // "thousand" | "million" | "billion" | null
       numbers,
       headers,
       element: target,

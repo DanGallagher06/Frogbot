@@ -41,6 +41,7 @@ releaseButton.addEventListener("click", async () => {
         "content/highlight.js",
         "content/extract.js",
         "content/score.js",
+        "content/facts.js",
         "content/main.js",
       ],
     });

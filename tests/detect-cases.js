@@ -34,6 +34,8 @@
     { source: "synthetic", text: "It expects $10–12 billion in sales.", expected: [money("$10–12 billion", 11000000000, { low: 10000000000, high: 12000000000 })] },
     { source: "synthetic", text: "Guidance is $10 billion to $12 billion.", expected: [money("$10 billion to $12 billion", 11000000000, { low: 10000000000, high: 12000000000 })] },
     { source: "synthetic", text: "Sales rose from $422.6 million to $482.6 million.", expected: [money("$422.6 million", 422600000), money("$482.6 million", 482600000)] },
+    { source: "synthetic", text: "Operating expenses increased by $3 million to $45 million.", expected: [money("$3 million", 3000000), money("$45 million", 45000000)] },
+    { source: "Wikipedia", text: "Apple ran a US$1.5-million television advertisement.", expected: [money("US$1.5-million", 1500000)] },
     { source: "synthetic", text: "It costs $5bn to build.", expected: [money("$5bn", 5000000000, { scale: "billion" })] },
     { source: "synthetic", text: "Costs fell to $3.2 million, from $4.1 million.", expected: [money("$3.2 million", 3200000), money("$4.1 million", 4100000)] },
     { source: "synthetic", text: "Revenue was $5 million to $6 million (estimated).", expected: [money("$5 million to $6 million", 5500000, { low: 5000000, high: 6000000 })] },

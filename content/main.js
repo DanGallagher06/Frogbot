@@ -5,9 +5,10 @@
   const Highlight = window.FrogbotHighlight;
   const Extract = window.FrogbotExtract;
   const Score = window.FrogbotScore;
+  const Facts = window.FrogbotFacts;
 
   // Guard against double injection: one frog (and one run) at a time.
-  if (!Frogbot || !Highlight || !Extract || !Score || Frogbot.isShowing()) return;
+  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || Frogbot.isShowing()) return;
 
   const debug = window.__frogbotDebug === true;
   const FROG_SIZE = 60;
@@ -360,7 +361,25 @@
       if (cancelled) return;
       await sleep(400);
     }
+    if (debug) logFacts(facts);
     // The frog stays at the last target; highlights stay until Escape.
+  }
+
+  // Debug only: the fact records built from this run's targets.
+  function logFacts(list) {
+    console.table(
+      list.map((f) => ({
+        label: f.label,
+        display: f.display,
+        role: f.role,
+        period: f.period ? `${f.period.text} (${f.periodSource})` : `none`,
+        labelConfidence: f.labelConfidence,
+        periodConfidence: f.periodConfidence || "none",
+        showOnCard: f.showOnCard,
+        sources: f.sources.length,
+      }))
+    );
+    console.log(`Frogbot: ${list.length} facts`);
   }
 
   function onKeyDown(event) {
@@ -376,6 +395,8 @@
 
   const scoring = scoreAndPick(blocks);
   const targets = fixedTargets() || scoring.targets;
+  // One record per caught figure, the data behind the stat card (milestone 2).
+  const facts = Facts.buildFacts(targets, blocks);
 
   Frogbot.show(startPosition(container, blocks));
   if (debug) showDebug(container, blocks, extractMs, scoring);

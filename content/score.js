@@ -66,8 +66,9 @@
   // Stops a number from being shortened by backtracking ("12.5" must not become "12").
   const NUM_END = String.raw`(?!\d|[.,]\d)`;
   const SCALE_WORDS = String.raw`thousand|million|billion|trillion|mln|bln|mn|bn|tn`;
-  // Scale words may follow a space; single letters must be attached ("$12.4B", "£300m").
-  const SCALE = String.raw`(?:\s?(?:${SCALE_WORDS})|[kKmMbBT])(?![A-Za-z])`;
+  // Scale words may follow a space or hyphen ("US$1.5-million"); single letters must be
+  // attached ("$12.4B", "£300m").
+  const SCALE = String.raw`(?:[\s-]?(?:${SCALE_WORDS})|[kKmMbBT])(?![A-Za-z])`;
   const DASH = String.raw`\s?[-–—]\s?`;
   // A dash range's second number must not belong to a following percent ("$46 - 6%").
   const NOT_PERCENT = String.raw`(?!\s?(?:%|per\s?cent|bps|basis|pts?\b))`;
@@ -104,7 +105,7 @@
   const MULTIPLIER = { thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
   function scaleOf(raw) {
     if (!raw) return null;
-    const s = raw.trim();
+    const s = raw.trim().replace(/^-/, "");
     if (/^(?:k|K|thousand)$/.test(s)) return "thousand";
     if (/^(?:m|M|mn|mln|million)$/.test(s)) return "million";
     if (/^(?:b|B|bn|bln|billion)$/.test(s)) return "billion";
@@ -528,7 +529,7 @@
       re: new RegExp(
         String.raw`(?<![\w.,$£€¥₹])(?<sign>[-−]\s?)?(?:\((?<bn>${NUM})${NUM_END}\)|(?<n1>${NUM})${NUM_END})` +
           String.raw`(?:${DASH}(?<n2>${NUM})${NUM_END}${NOT_PERCENT})?` +
-          String.raw`(?<scale>\s?(?:${SCALE_WORDS})(?![A-Za-z])|[kKMBT](?![A-Za-z]))?`,
+          String.raw`(?<scale>[\s-]?(?:${SCALE_WORDS})(?![A-Za-z])|[kKMBT](?![A-Za-z]))?`,
         "g"
       ),
       build: (m, t) => {
@@ -569,7 +570,8 @@
     const sep = text.slice(a.end, b.start);
     const before = text.slice(Math.max(0, a.start - 12), a.start);
     if (sep === "" && /^[-–—]/.test(b.raw)) return "dash"; // "8%-10%": the dash was read as a sign
-    if (/^\s*(?:to|–|—|-)\s*$/i.test(sep)) return /\bfrom\s+$/i.test(before) ? null : "to";
+    // "from X to Y" and "by X to Y" ("increased by $3M to $45M") are a change, not a range.
+    if (/^\s*(?:to|–|—|-)\s*$/i.test(sep)) return /\b(?:from|by)\s+$/i.test(before) ? null : "to";
     if (/^\s+and\s+$/i.test(sep) && /\bbetween\s+$/i.test(before)) return "and";
     return null;
   }

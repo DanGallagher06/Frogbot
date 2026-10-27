@@ -207,7 +207,105 @@
     };
   }
 
-  const harness = { runTests, runScoreTests };
+  // ---- Fact cases (tests/facts-cases.js) ----
+
+  // Units for a facts case: sentences, sentences under a heading, or table rows.
+  function factUnits(score, specs) {
+    return specs.map((spec, i) => {
+      if (typeof spec === "string" || spec.text) {
+        const text = typeof spec === "string" ? spec : spec.text;
+        return {
+          kind: "sentence",
+          text,
+          numbers: score.detectNumbers(text),
+          sentence: { start: 0, end: text.length },
+          blockText: text,
+          heading: spec.heading || null,
+          pageTitle: spec.pageTitle || null,
+          listIntro: spec.listIntro || null,
+          blockIndexes: [i],
+          order: i,
+        };
+      }
+      let offset = 0;
+      const cells = spec.row.map((text, k) => {
+        const cell = { start: offset, end: offset + text.length, text, header: (spec.headers || [])[k] || null };
+        offset += text.length + 3;
+        return cell;
+      });
+      const text = spec.row.join(" | ");
+      return {
+        kind: "row",
+        text,
+        numbers: score.detectNumbers(text, { inTable: true }),
+        cells,
+        headers: (spec.headers || []).filter(Boolean),
+        tableTitle: spec.title || "",
+        tableScale: spec.scale || null,
+        heading: spec.heading || null,
+        blockIndexes: [i],
+        order: i,
+      };
+    });
+  }
+
+  function factProblems(exp, got) {
+    const problems = [];
+    const check = (field, actual) => {
+      if (!(field in exp)) return;
+      if (JSON.stringify(actual) !== JSON.stringify(exp[field])) {
+        problems.push(`${field}: expected ${JSON.stringify(exp[field])}, got ${JSON.stringify(actual)}`);
+      }
+    };
+    check("label", got.label);
+    check("display", got.display);
+    check("role", got.role);
+    check("period", got.period ? got.period.text : null);
+    check("periodSource", got.periodSource);
+    check("confidence", got.confidence);
+    check("labelConfidence", got.labelConfidence);
+    check("periodConfidence", got.periodConfidence);
+    check("showOnCard", got.showOnCard);
+    check("periodInferred", got.periodInferred);
+    check("qualifiers", got.qualifiers);
+    check("change", got.change ? got.change.display : null);
+    check("linked", Boolean(got.linkedTo));
+    check("sources", got.sources.length);
+    if ("sentenceStarts" in exp && !got.sentence.startsWith(exp.sentenceStarts)) {
+      problems.push(`sentence: expected to start "${exp.sentenceStarts}", got "${got.sentence.slice(0, 40)}"`);
+    }
+    return problems;
+  }
+
+  function runFactsTests(facts, score, cases) {
+    const started = Date.now();
+    const results = (cases || []).map((c) => {
+      const units = factUnits(score, c.units);
+      const got = facts.buildFacts([{ units }], [], c.context || {});
+      const problems = [];
+      if (got.length !== c.expect.length) problems.push(`expected ${c.expect.length} facts, got ${got.length}`);
+      c.expect.forEach((exp, i) => {
+        if (!got[i]) return;
+        for (const p of factProblems(exp, got[i])) problems.push(`fact ${i + 1} ${p}`);
+      });
+      const summary = got.map((f) => `${f.label}: ${f.display} (${f.role}, ${f.period ? f.period.text : "no period"} [${f.periodSource}], label ${f.labelConfidence}, period ${f.periodConfidence}${f.showOnCard ? ", card" : ""}${f.sources.length > 1 ? `, ${f.sources.length} sources` : ""})`);
+      const text = c.units.map((u) => (typeof u === "string" ? u : u.text || u.row.join(" | "))).join("  +  ");
+      return { text, expect: c.expect, got: summary, problems, pass: problems.length === 0 };
+    });
+    const passed = results.filter((r) => r.pass).length;
+    return {
+      results,
+      summary: {
+        total: results.length,
+        passed,
+        failed: results.length - passed,
+        accuracy: results.length ? Math.round((passed / results.length) * 1000) / 10 : null,
+        ms: Date.now() - started,
+      },
+    };
+  }
+
+  const harness = { runTests, runScoreTests, runFactsTests };
   if (typeof window !== "undefined") window.FrogbotTestHarness = harness;
   if (typeof module !== "undefined" && module.exports) module.exports = harness;
 })();

@@ -85,10 +85,11 @@ content/extract.js   window.FrogbotExtract: main-content detection, text blocks,
 content/score.js     window.FrogbotScore: sentence splitting, number detection, scoring
                      and target picking (pure functions, no page access)
 content/highlight.js window.FrogbotHighlight: exact figure marks, whole-block fallback, clearAll()
+content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
 assets/frog.svg      Reference copy of the frog artwork
 test-pages/          Local pages for testing
-tests/               Detection, scoring and held-out test cases, the browser test runner,
-                     and snapshots of the targets picked on each test page
+tests/               Detection, scoring, facts and held-out test cases, the browser test
+                     runner, and snapshots of the targets and facts on each test page
 tools/               Developer scripts (not part of the extension)
 ```
 
@@ -97,12 +98,13 @@ tools/               Developer scripts (not part of the extension)
 `content/score.js` is plain code with no page access, so it is tested on its own against
 the cases in `tests/detect-cases.js`, `tests/score-cases.js` and `tests/holdout-cases.js`
 (number detection, sentence splitting and scoring; see "Measuring accuracy honestly" below).
+`content/facts.js` is tested the same way against `tests/facts-cases.js`.
 
 - **In the browser:** open `tests/run-tests.html` straight from the file system in Edge or
   Chrome. It shows a summary, accuracy for each number type, and a row per case; failed
   rows show what was expected and what was found. Reload after editing the code or cases.
-The page has three sections: the development detection cases, the scoring cases
-(`tests/score-cases.js`) and the held-out set.
+The page has four sections: the development detection cases, the scoring cases
+(`tests/score-cases.js`), the facts cases (`tests/facts-cases.js`) and the held-out set.
 
 - **From the command line:** `python tools/run_tests.py` runs the same page in headless
   Edge or Chrome and prints the summary and any failures for each set (exit status 1 if
@@ -145,8 +147,49 @@ figures). `score.js` scores every unit with `scoreUnit()` and picks targets with
   page order so the frog only hops downward.
 
 After changing weights, run `python tools/snapshot_targets.py`. It prints how the picks
-changed on each test page compared with `tests/snapshots/`; run it with `--update` to save
-the new picks once you're happy with them.
+and their fact records changed on each test page compared with `tests/snapshots/`; run it
+with `--update` to save the new picks once you're happy with them.
+
+## Fact records
+
+After picking targets, `facts.js` turns every figure it caught into a record:
+`FrogbotFacts.buildFacts(targets, blocks)`. Nothing is shown on the page yet; the records
+are for the stat card (Milestone 2). With debug on, they are logged with `console.table`
+at the end of a run (label, figure, role, period and source, both confidences, showOnCard).
+
+Each record has the figure (`value`, or `low`/`high` for a range, `type`, `currency`,
+`scale`, and a short `display` like "$482.6M" or "$505M–$525M"), plus:
+
+- **label**: the table row header, or the nearest finance term before the figure in the
+  same clause ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached:
+  GAAP / non-GAAP, adjusted, diluted, organic, a segment name ("Gaming revenue"), or a table
+  title. Guidance figures get "Guidance: <metric>". When no term is found, the label is a
+  short snippet of the text before the figure.
+- **role**: `level`, `change` (rose 14.2%, +19.1%, year-over-year), `guidance` or
+  `estimate` (analyst or consensus figures). A change is linked to the level with the same
+  label in the same clause or row (`change` on the level, `linkedTo` on the change).
+- **period** and **periodSource**: the period in the same clause (`clause`), then elsewhere
+  in the sentence (`sentence`), then the table column header (`table`), then the line that
+  introduces a list (`listIntro`, e.g. "NVIDIA's outlook for the third quarter of fiscal 2026
+  is as follows:"), then the nearest heading (`heading`, including bold-paragraph headings, and
+  the page's title until the first heading), then the page's most common period (`page`), or
+  none. Guidance never takes the page's period, since that is usually the quarter just
+  reported. A table's change column never takes a heading or page period.
+- **labelConfidence**: `high` for a table row header, or a finance term in the figure's own
+  clause; `medium` for a label with qualifiers or a segment, a term borrowed from an earlier
+  clause, or a guidance label; `low` for a snippet of the text before the figure.
+- **periodConfidence**: `high` for `clause`; `medium` for `sentence`, `table`, `listIntro`
+  and `heading`; `low` for `page`; null when there is no period. `periodInferred` is true when
+  it's `low`, so the card can show that period more faintly.
+- **confidence**: the lower of the two (a missing period doesn't lower it), kept for the
+  debug table.
+- **showOnCard**: true when the label is `high` or `medium` and the fact is a level, guidance,
+  or a change with no level to link to. Linked changes show beside their level; snippet-labelled
+  facts are left for the card's "Also caught" section.
+- **sources**: every place the figure was caught. The same figure with the same label,
+  period and qualifiers is merged into one record (money within 0.5%, percentages exactly),
+  keeping the most confident copy, prose before tables on a tie. Different qualifiers
+  (GAAP vs non-GAAP) are never merged.
 
 ## Measuring accuracy honestly
 
@@ -225,8 +268,11 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
     scale, ranges and negatives, with junk like phone numbers flagged, plus a test suite
   - Step 8: scoring sentences and table rows and choosing the frog's targets
   - Step 9: exact-number highlighting, coloured by type, with the tongue aimed at each figure
-- **Milestone 2: end-of-page stat card (not started).** A small table of the key figures the
+- **Milestone 2: end-of-page stat card (in progress).** A small table of the key figures the
   frog caught, with up/down arrows for changes; clicking a figure scrolls back to it.
+  - Step 10: fact records in `facts.js`: a label, role, period, label and period confidence,
+    and card eligibility for each caught figure, with changes linked to their levels and
+    duplicates merged (no UI yet)
 - **Milestone 3: AI summary (not started).** A short summary written only from the chosen
   sentences, with a check that every number in the summary appears on the page. On-device AI
   where the browser has it, and a rules-only fallback otherwise.

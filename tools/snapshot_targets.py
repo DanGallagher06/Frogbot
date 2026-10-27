@@ -1,9 +1,10 @@
 """Snapshot which targets Frogbot picks on each test page, and show what changed.
 
 For every page in test-pages/ (not test-pages/local/), this renders a temporary copy of the
-page with content/extract.js and content/score.js added, in headless Edge or Chrome, runs
-extraction and scoring, and records the chosen targets (unit index, score, kind, first 80
-characters) in tests/snapshots/<page>.json.
+page with content/extract.js, score.js and facts.js added, in headless Edge or Chrome, runs
+extraction, scoring and fact building, and records the chosen targets (unit index, score,
+kind, first 80 characters) in tests/snapshots/<page>.json and the fact records (label,
+display, role, period, label/period confidence, card eligibility, sources) in tests/snapshots/<page>.facts.json.
 
   python tools/snapshot_targets.py           compare with the saved snapshots, print changes
   python tools/snapshot_targets.py --update  save the current picks as the new snapshots
@@ -26,7 +27,7 @@ from run_tests import find_browser  # same folder
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PAGES = ROOT / "test-pages"
 SNAPSHOTS = ROOT / "tests" / "snapshots"
-SCRIPTS = [ROOT / "content" / "extract.js", ROOT / "content" / "score.js"]
+SCRIPTS = [ROOT / "content" / "extract.js", ROOT / "content" / "score.js", ROOT / "content" / "facts.js"]
 
 RUNNER = """
 <script>
@@ -39,12 +40,33 @@ RUNNER = """
     const units = FrogbotExtract.buildUnits(blocks, FrogbotScore);
     const totalWords = blocks.reduce((sum, b) => sum + b.text.split(/\\s+/).length, 0);
     const { chosen } = FrogbotScore.rankUnits(units, { totalWords });
-    out.textContent = JSON.stringify(chosen.map((u) => ({
-      index: units.indexOf(u),
-      score: u.finalScore ?? u.score,
-      kind: u.kind,
-      text: u.text.slice(0, 80),
-    })));
+    const byElement = new Map();
+    for (const u of chosen) {
+      if (!byElement.has(u.element)) byElement.set(u.element, { units: [] });
+      byElement.get(u.element).units.push(u);
+    }
+    const facts = FrogbotFacts.buildFacts([...byElement.values()], blocks);
+    out.textContent = JSON.stringify({
+      targets: chosen.map((u) => ({
+        index: units.indexOf(u),
+        score: u.finalScore ?? u.score,
+        kind: u.kind,
+        text: u.text.slice(0, 80),
+      })),
+      facts: facts.map((f) => ({
+        label: f.label,
+        display: f.display,
+        role: f.role,
+        period: f.period ? f.period.text : null,
+        periodSource: f.periodSource,
+        labelConfidence: f.labelConfidence,
+        periodConfidence: f.periodConfidence,
+        confidence: f.confidence,
+        showOnCard: f.showOnCard,
+        periodInferred: f.periodInferred,
+        sources: f.sources.length,
+      })),
+    });
   } catch (error) {
     out.textContent = JSON.stringify({ error: String(error && error.stack || error) });
   }
@@ -79,6 +101,24 @@ def picks_for(page: pathlib.Path, browser: str) -> list:
     return data
 
 
+def describe_fact_changes(old: list, new: list) -> list:
+    key = lambda f: (f["label"], f["display"], f["role"])
+    old_keys = {key(f): f for f in old}
+    new_keys = {key(f): f for f in new}
+    lines = []
+    for f in new:
+        before = old_keys.get(key(f))
+        if before is None:
+            lines.append(f"  + new fact     {f['label']}: {f['display']} ({f['role']}, {f['period']}, {f['confidence']})")
+        elif before != f:
+            brief = lambda x: f"{x['period']}/{x.get('labelConfidence')}+{x.get('periodConfidence')}/{'card' if x.get('showOnCard') else 'no card'}/{x['sources']}"
+            lines.append(f"  ~ changed      {f['label']}: {f['display']} ({brief(before)} -> {brief(f)})")
+    for f in old:
+        if key(f) not in new_keys:
+            lines.append(f"  - fact gone    {f['label']}: {f['display']}")
+    return lines
+
+
 def describe_changes(old: list, new: list) -> list:
     old_by_text = {p["text"]: p for p in old}
     new_by_text = {p["text"]: p for p in new}
@@ -103,21 +143,24 @@ def main() -> None:
     SNAPSHOTS.mkdir(parents=True, exist_ok=True)
     changed = False
     for page in sorted(PAGES.glob("*.html")):
-        picks = picks_for(page, browser)
-        snapshot = SNAPSHOTS / f"{page.stem}.json"
-        if not snapshot.exists() or update:
-            existed = snapshot.exists()
-            snapshot.write_text(json.dumps(picks, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            print(f"{page.name}: {'updated' if existed else 'created'} snapshot with {len(picks)} targets")
-            continue
-        old = json.loads(snapshot.read_text(encoding="utf-8"))
-        lines = describe_changes(old, picks)
-        if lines:
-            changed = True
-            print(f"{page.name}: picks changed ({len(old)} -> {len(picks)} targets)")
-            print("\n".join(lines))
-        else:
-            print(f"{page.name}: unchanged ({len(picks)} targets)")
+        result = picks_for(page, browser)
+        for kind, data, describe in (("targets", result["targets"], describe_changes),
+                                     ("facts", result["facts"], describe_fact_changes)):
+            suffix = "" if kind == "targets" else ".facts"
+            snapshot = SNAPSHOTS / f"{page.stem}{suffix}.json"
+            if not snapshot.exists() or update:
+                existed = snapshot.exists()
+                snapshot.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                print(f"{page.name}: {'updated' if existed else 'created'} {kind} snapshot ({len(data)} {kind})")
+                continue
+            old = json.loads(snapshot.read_text(encoding="utf-8"))
+            lines = describe(old, data)
+            if lines:
+                changed = True
+                print(f"{page.name}: {kind} changed ({len(old)} -> {len(data)})")
+                print("\n".join(lines))
+            else:
+                print(f"{page.name}: {kind} unchanged ({len(data)})")
     if changed:
         print("\nIf these changes are intended, run with --update to save them.")
         sys.exit(1)
