@@ -12,6 +12,7 @@
 //   same:    { a, b }          a and b score the same
 //   topic:   { text, topic }   topicOf(text) is this topic
 //   pageYear: { texts, currentYear, expect }  the page's reference year for recency
+//   figures: { text, expect: [[figure, [attached periods]]] }  what step 9 highlights
 (() => {
   const row = (text, headers = [], context = {}) => ({ text, row: true, headers, context });
   const cases = [
@@ -286,6 +287,16 @@
       a: "Shares rose 3% to $41.20, see www.example.com/revenue-vs-2025-guidance for details.",
       b: "Shares rose 3% to $41.20, see the website for details.",
     },
+
+    // ---- What gets highlighted (step 9) ----
+    { kind: "figures", text: "Revenue rose 12% to $12.4B in Q3 2026, the company said.", expect: [["12%", []], ["$12.4B", ["Q3 2026"]]] },
+    { kind: "figures", text: "Revenue was US$215.9 billion in fiscal 2026, up 114% on the year before.", expect: [["US$215.9 billion", ["fiscal 2026"]], ["114%", []]] },
+    // Comparison markers aren't dates; a period across a clause break isn't attached.
+    { kind: "figures", text: "Revenue rose to $482.6 million, up 14.2% year over year.", expect: [["$482.6 million", []], ["14.2%", []]] },
+    { kind: "figures", text: "For the fourth quarter of 2026, Lilypad expects revenue of $505 million.", expect: [["$505 million", []]] },
+    // Junk and plain counts are never highlighted.
+    { kind: "figures", text: "Call (555) 014-7781 about the $2 million fund for 30 schools.", expect: [["$2 million", []]] },
+    { kind: "figures", text: "Revenue | $482.6 | $422.6 | +14.2%", row: true, expect: [["$482.6", []], ["$422.6", []], ["+14.2%", []]] },
   ];
 
   if (typeof window !== "undefined") window.FrogbotScoreCases = cases;

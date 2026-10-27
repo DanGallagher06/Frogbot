@@ -1,0 +1,32 @@
+[
+  {
+    "index": 0,
+    "score": 11,
+    "kind": "sentence",
+    "text": "Revenue rose 12% to $12.4B in Q3 2026, the company said, driven by its cloud bus"
+  },
+  {
+    "index": 1,
+    "score": 11,
+    "kind": "sentence",
+    "text": "Net income was $61.3 million, up 28% from a year earlier, as costs fell."
+  },
+  {
+    "index": 4,
+    "score": 11,
+    "kind": "sentence",
+    "text": "Revenue was US$215.9 billion in fiscal 2026, up 114% on the year before."
+  },
+  {
+    "index": 6,
+    "score": 10,
+    "kind": "sentence",
+    "text": "Read about the $500 million buyback programme, which is up 25% on last year's pl"
+  },
+  {
+    "index": 13,
+    "score": 10,
+    "kind": "sentence",
+    "text": "Diluted EPS rose to $1.42 last quarter, and capital spending reached $9.8 billio"
+  }
+]

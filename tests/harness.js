@@ -149,6 +149,12 @@
         pass,
       };
     }
+    if (c.kind === "figures") {
+      const numbers = score.detectNumbers(c.text, { inTable: Boolean(c.row) });
+      const got = score.figureGroups(numbers, c.text).map((g) => [g.figure.raw, g.extras.map((e) => e.raw)]);
+      const pass = JSON.stringify(got) === JSON.stringify(c.expect);
+      return { ...c, label: `figures to highlight in "${c.text}"`, detail: JSON.stringify(got), pass };
+    }
     if (c.kind === "pageYear") {
       const numbers = c.texts.flatMap((text) => score.detectNumbers(text));
       const got = score.pageYear(numbers, c.currentYear);

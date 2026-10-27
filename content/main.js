@@ -11,6 +11,8 @@
 
   const debug = window.__frogbotDebug === true;
   const FROG_SIZE = 60;
+  const MAX_FLICKS_PER_TARGET = 3;
+  const EXTRA_FLICK_PAUSE_MS = 120;
   const START_CLEARANCE = 10; // gap between the frog's bottom edge and the first block
   const MAX_ABOVE_CONTAINER = 80; // how far above the main container the frog may start
   const SEARCH_STEP = 20; // grid spacing when looking for a clear start spot
@@ -68,6 +70,69 @@
     return marked
       .sort((a, b) => Number(a.dataset.frogbotTarget) - Number(b.dataset.frogbotTarget))
       .map((el) => ({ element: el, highlight: el, units: [] }));
+  }
+
+  // ---- Exact-number highlighting ----
+
+  // The figures to catch at a target, as tongue flicks: each flick aims at a key figure and
+  // reveals it (with any period attached to it). Up to MAX_FLICKS_PER_TARGET flicks; the last
+  // one also reveals any figures beyond that. All marks are placed (hidden) up front.
+  // fallback is true if any figure couldn't be mapped to the page; the whole block or row is
+  // then highlighted too.
+  function planFigures(target) {
+    const groups = []; // [{ items: [{ block, start, end, type, raw }] }]
+    for (const unit of target.units) {
+      for (const group of Score.figureGroups(unit.numbers || [], unit.text)) {
+        const items = [group.figure, ...group.extras].map((n) => locate(unit, n)).filter(Boolean);
+        if (items.length) groups.push({ items });
+      }
+    }
+    if (!groups.length) return { flicks: [], fallback: false };
+
+    const flat = groups.flatMap((g) => g.items);
+    const marks = Highlight.prepare(
+      flat.map((item) => ({ ranges: Extract.rangesFor(item.block, item.start, item.end), type: item.type }))
+    );
+    let fallback = false;
+    flat.forEach((item, i) => {
+      item.marks = marks[i];
+      if (!marks[i]) {
+        fallback = true;
+        if (debug) console.log(`Frogbot: couldn't map "${item.raw}" to the page; highlighting the whole block`, item.block.element);
+      }
+    });
+
+    const flicks = [];
+    groups.forEach((group, i) => {
+      const els = group.items.flatMap((item) => item.marks || []);
+      if (!els.length) return;
+      if (flicks.length < MAX_FLICKS_PER_TARGET) flicks.push({ aim: els[0], marks: els });
+      else flicks[flicks.length - 1].marks.push(...els);
+    });
+    return { flicks, fallback };
+  }
+
+  // Where a unit's number sits: the block (or table cell) text it came from, and its position.
+  function locate(unit, n) {
+    if (unit.kind === "row") {
+      const cell = (unit.cells || []).find((c) => n.start >= c.start && n.start < c.end);
+      if (!cell) return null;
+      return {
+        block: { element: cell.element, text: cell.text },
+        start: n.start - cell.start,
+        end: n.end - cell.start,
+        type: n.type,
+        raw: n.raw,
+      };
+    }
+    const offset = unit.sentence ? unit.sentence.start : 0;
+    return {
+      block: { element: unit.element, text: unit.blockText || unit.text },
+      start: offset + n.start,
+      end: offset + n.end,
+      type: n.type,
+      raw: n.raw,
+    };
   }
 
   // ---- Start position ----
@@ -273,8 +338,25 @@
       if (cancelled) return;
       await sleep(200);
       if (cancelled) return;
-      // Whole block (or whole table row) for now; exact numbers come in step 9.
-      await Frogbot.tongueTo(target.element, () => Highlight.mark(target.highlight));
+      const plan = planFigures(target);
+      if (!plan.flicks.length) {
+        // Nothing to catch exactly (or ?frogbot-fixed targets): the whole block or row.
+        await Frogbot.tongueTo(target.element, () => Highlight.mark(target.highlight));
+      }
+      for (let i = 0; i < plan.flicks.length; i++) {
+        if (cancelled) return;
+        const flick = plan.flicks[i];
+        if (i > 0) await sleep(EXTRA_FLICK_PAUSE_MS);
+        if (cancelled) return;
+        await Frogbot.tongueTo(
+          flick.aim,
+          () => {
+            Highlight.reveal(flick.marks);
+            if (i === 0 && plan.fallback) Highlight.mark(target.highlight);
+          },
+          { quick: i > 0 }
+        );
+      }
       if (cancelled) return;
       await sleep(400);
     }

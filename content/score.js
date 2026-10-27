@@ -74,7 +74,7 @@
 
   const CURRENCY_PREFIX =
     String.raw`(?<![A-Za-z])(?:US\$|USD ?|C\$|CA\$|CAD ?|A\$|AU\$|AUD ?|NZ\$|HK\$|HKD ?|S\$|SGD ?|` +
-    String.raw`NT\$|R\$|\$|£|GBP ?|€|EUR ?|¥|JPY ?|CNY ?|RMB ?|₹|INR ?|CHF ?)`;
+    String.raw`NT\$|R\$|\$|£|GBP ?|€|EUR ?|¥|JPY ?|CNY ?|RMB ?|₹|INR ?|CHF ?)(?:\s(?=\d))?`;
   const CURRENCY_CODES = {
     "US$": "USD", $: "USD", "C$": "CAD", "CA$": "CAD", "A$": "AUD", "AU$": "AUD", "NZ$": "NZD",
     "HK$": "HKD", "S$": "SGD", "NT$": "TWD", "R$": "BRL", "£": "GBP", "€": "EUR", "¥": "JPY",
@@ -915,6 +915,43 @@
   }
 
   // ---------------------------------------------------------------------------
+  // What to highlight (step 9)
+  // ---------------------------------------------------------------------------
+
+  const HIGHLIGHT_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "multiple"]);
+  const WHEN_TYPES = new Set(["period", "date", "year"]);
+  const ATTACH_CHARS = 15; // a period this close to a figure belongs to it ("$12.4B in Q3 2026")
+
+  // The figures to highlight in a chosen sentence or row, in order: every non-junk money,
+  // per-share, percent, basis-point and multiple figure, each with the periods, dates and
+  // years attached to it (separated by a short connector and no clause break).
+  // Returns [{ figure, extras: [periods...] }].
+  function figureGroups(numbers, text) {
+    const real = numbers.filter((n) => !n.junk);
+    const groups = real
+      .filter((n) => HIGHLIGHT_TYPES.has(n.type))
+      .map((figure) => ({ figure, extras: [] }));
+    for (const n of real) {
+      // Comparison markers ("year over year", "sequentially") are typed period but aren't dates.
+      if (!WHEN_TYPES.has(n.type) || n.decade || /over|on[\s-]year|sequential|yoy|qoq|[yq]\/[yq]/i.test(n.raw)) continue;
+      let best = null;
+      let bestGap = Infinity;
+      for (const group of groups) {
+        const f = group.figure;
+        const between =
+          n.start >= f.end ? text.slice(f.end, n.start) : n.end <= f.start ? text.slice(n.end, f.start) : null;
+        if (between === null || between.length > ATTACH_CHARS || /[.;:|]|\band\b/.test(between)) continue;
+        if (between.length < bestGap) {
+          best = group;
+          bestGap = between.length;
+        }
+      }
+      if (best) best.extras.push(n);
+    }
+    return groups;
+  }
+
+  // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
@@ -1028,6 +1065,7 @@
     rankUnits,
     topicOf,
     pageYear,
+    figureGroups,
     WEIGHTS,
     MIN_SCORE,
   };

@@ -490,6 +490,7 @@
           kind: "sentence",
           text: sentence.text,
           sentence: { start: sentence.start, end: sentence.end },
+          blockText: block.text,
           element: block.element,
           highlight: block.element,
           group: block.index,
@@ -528,7 +529,7 @@
       const text = cellText(cell);
       if (!text) continue;
       if (parts.length) offset += 3; // " | "
-      spans.push([offset, offset + text.length, cell]);
+      spans.push([offset, offset + text.length, cell, text]);
       parts.push(text);
       offset += text.length;
     }
@@ -553,6 +554,7 @@
     return {
       kind: "row",
       text: rowText,
+      cells: spans.map(([start, end, cell, text]) => ({ start, end, element: cell, text })),
       numbers,
       headers,
       element: target,
@@ -565,5 +567,96 @@
     };
   }
 
-  window.FrogbotExtract = { findMainContainer, getBlocks, buildUnits };
+  // ---------------------------------------------------------------------------
+  // Mapping cleaned text back to the page (step 9)
+  // ---------------------------------------------------------------------------
+
+  // A block's text is cleaned (whitespace collapsed, citation markers removed, read through
+  // innerText), so its positions don't match the DOM. alignment() lines the cleaned text up
+  // with the element's visible text nodes, character by character: whitespace runs match
+  // whitespace runs (including &nbsp; and line breaks), letters compare case-insensitively
+  // (innerText applies CSS text-transform), and citation markers like "[1]" that the cleaned
+  // text dropped are skipped in the DOM. Each cleaned character maps to { node, offset } or
+  // null. If the two texts stop agreeing, everything after that point stays null.
+  // Built fresh on each call: highlighting splits text nodes, so a cached map would go stale.
+  const MARKER_AT = new RegExp(MARKERS.source, "iy");
+
+  function alignment(element, text) {
+    const chars = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest("script, style, noscript, template")) continue;
+      if (!parent.checkVisibility({ visibilityProperty: true })) continue;
+      for (let k = 0; k < node.data.length; k++) chars.push({ node, offset: k });
+    }
+    const dom = chars.map((c) => c.node.data[c.offset]).join("");
+    const isSpace = (ch) => /\s/.test(ch);
+    const map = new Array(text.length).fill(null);
+    let j = 0;
+    outer: for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (isSpace(ch)) {
+        // A space in the cleaned text matches a whitespace run in the DOM, if there is one
+        // (innerText can add a space between elements that the DOM doesn't have).
+        if (j < dom.length && isSpace(dom[j])) {
+          map[i] = chars[j];
+          while (j < dom.length && isSpace(dom[j])) j++;
+        }
+        continue;
+      }
+      while (j < dom.length && dom[j].toLowerCase() !== ch.toLowerCase()) {
+        if (isSpace(dom[j])) {
+          j++;
+          continue;
+        }
+        MARKER_AT.lastIndex = j;
+        const marker = MARKER_AT.exec(dom);
+        if (marker) {
+          j += marker[0].length;
+          continue;
+        }
+        break outer; // the texts disagree: leave the rest unmapped
+      }
+      if (j >= dom.length) break;
+      map[i] = chars[j];
+      j++;
+    }
+    return map;
+  }
+
+  // DOM Ranges covering cleaned-text positions [start, end) of a block ({ element, text }):
+  // one Range per text node the characters span ("<b>$12.4</b>B" gives two). Returns null if
+  // any non-space character can't be mapped.
+  function rangesFor(block, start, end) {
+    const map = alignment(block.element, block.text);
+    const pieces = [];
+    let current = null;
+    for (let i = start; i < end; i++) {
+      const at = map[i];
+      if (!at) {
+        if (isSpaceChar(block.text[i])) {
+          current = null;
+          continue;
+        }
+        return null;
+      }
+      if (current && current.node === at.node && current.end === at.offset) current.end += 1;
+      else {
+        current = { node: at.node, start: at.offset, end: at.offset + 1 };
+        pieces.push(current);
+      }
+    }
+    return pieces
+      .filter((p) => p.node.data.slice(p.start, p.end).trim())
+      .map((p) => {
+        const range = document.createRange();
+        range.setStart(p.node, p.start);
+        range.setEnd(p.node, p.end);
+        return range;
+      });
+  }
+  const isSpaceChar = (ch) => /\s/.test(ch || "");
+
+  window.FrogbotExtract = { findMainContainer, getBlocks, buildUnits, rangesFor };
 })();

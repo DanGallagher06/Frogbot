@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Figure Mapping Test Page | Frogbot</title>
+  <!--
+    Test page for exact-number highlighting: figures split across elements, &nbsp;,
+    citation markers, line breaks, links and table cells. Each case lists the text that
+    should be highlighted in data-expect-figures (figures separated by "|").
+  -->
+  <style>
+    body { margin: 0; font-family: Georgia, serif; color: #222; background: #fff; line-height: 1.6; }
+    header { background: #263238; color: #fff; padding: 14px 20px; font: 700 20px Arial, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 20px 60px; }
+    sup { font-size: 0.7em; }
+    sup a { color: #1565c0; text-decoration: none; }
+    table { border-collapse: collapse; font: 14px Arial, sans-serif; margin: 16px 0; width: 100%; }
+    th, td { border-bottom: 1px solid #ddd; padding: 6px 10px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+  </style>
+</head>
+<body>
+  <header>Mapping Holdings · Investor News</header>
+  <main>
+    <h1>Mapping Holdings reports third-quarter results</h1>
+
+    <p data-expect-figures="12%|$12.4B|Q3 2026">Revenue rose 12% to <b>$12.4</b>B in Q3 2026, the company said, driven by its cloud business.</p>
+
+    <p data-expect-figures="$61.3 million|28%">Net income was <a href="#net">$61</a>.3 million, up 28% from a year earlier, as costs fell.</p>
+
+    <p data-expect-figures="17.4%">Operating margin hit <span>17</span>.<span>4</span>% in the quarter, the highest in the company's history.</p>
+
+    <p data-expect-figures="$ 4.2 billion|9%">Sales reached $&nbsp;4.2 billion, up 9%, helped by strong demand in Europe and Asia.</p>
+
+    <p data-expect-figures="US$215.9 billion|fiscal 2026|114%">Revenue was US$215.9&nbsp;billion<sup class="reference"><a href="#cite-1">[1]</a></sup> in fiscal 2026, up 114%<sup class="reference"><a href="#cite-2">[2]</a></sup> on the year before.</p>
+
+    <p data-expect-figures="$3.2 billion">$3.2 billion in share buybacks were completed during the quarter, the board said.</p>
+
+    <p data-expect-figures="$500 million|25%">Read about the <a href="#buyback">$500 million</a> buyback programme, which is up 25% on last year's plan.</p>
+
+    <p data-expect-figures="180 basis points|43.5%">Gross margin<br>expanded 180 basis points to 43.5%, reflecting lower component costs.</p>
+
+    <p data-expect-figures="$55.8 million">Free cash flow of <strong>$55.8</strong> million funded the dividend and the company's expansion.</p>
+
+    <p data-expect-figures="8.5%|$3.1 billion">Profit rose <span><b>8</b>.5</span>% to <span>$</span>3.1 billion, beating the company's own forecast.</p>
+
+    <p data-expect-figures="$2 million">Investors can call (555) 014-7781 to ask about the $2 million community fund for local schools.</p>
+
+    <table>
+      <thead>
+        <tr><th>(in millions, except per share)</th><th>Q3 2026</th><th>Q3 2025</th><th>Change</th></tr>
+      </thead>
+      <tbody>
+        <tr data-expect-figures="$482.6|$422.6|+14.2%"><td>Revenue</td><td><b>$482.6</b></td><td><span>$422.6</span></td><td><i>+14.2</i>%</td></tr>
+        <tr data-expect-figures="$1.27|$1.12|+13.4%"><td>Diluted EPS</td><td>$<span>1</span>.27</td><td><a href="#eps">$1.12</a></td><td>+13.4%<sup class="reference"><a href="#cite-3">[3]</a></sup></td></tr>
+      </tbody>
+    </table>
+
+    <p data-expect-figures="$1.42|$9.8 billion">Diluted EPS rose to $1.42 last quarter, and capital spending reached $9.8 billion</p>
+  </main>
+</body>
+</html>

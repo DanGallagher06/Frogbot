@@ -166,7 +166,44 @@
   from { background-color: rgba(255, 224, 70, 0); }
 }
 
+/* ---- Exact-number highlights ----
+   Marks are placed hidden before the tongue flicks and revealed as each one hits. Only
+   background and box-shadow change (no padding or borders), so text never moves. The colours
+   are translucent so they read on light and dark sites alike. */
+
+mark.frogbot-num {
+  display: inline !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
+  font: inherit !important;
+  text-decoration: inherit !important;
+  box-shadow: none !important;
+  border-radius: 3px !important;
+  transition: background-color 250ms ease-out, box-shadow 250ms ease-out;
+}
+
+mark.frogbot-num.frogbot-num-on.frogbot-num-money {
+  background: rgba(255, 193, 7, 0.45) !important; /* gold: money, per share */
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.45) !important;
+}
+mark.frogbot-num.frogbot-num-on.frogbot-num-percent {
+  background: rgba(66, 165, 245, 0.35) !important; /* blue: percent, basis points */
+  box-shadow: 0 0 0 2px rgba(66, 165, 245, 0.35) !important;
+}
+mark.frogbot-num.frogbot-num-on.frogbot-num-period {
+  background: rgba(171, 71, 188, 0.28) !important; /* purple: period, date, year */
+  box-shadow: 0 0 0 2px rgba(171, 71, 188, 0.28) !important;
+}
+mark.frogbot-num.frogbot-num-on.frogbot-num-count {
+  background: rgba(158, 158, 158, 0.35) !important; /* grey: multiple, count */
+  box-shadow: 0 0 0 2px rgba(158, 158, 158, 0.35) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  mark.frogbot-num { transition: none; }
   .frogbot-frog .frogbot-leg { transition: none; }
   .frogbot-hl.frogbot-hl.frogbot-hl { animation: none; }
 }

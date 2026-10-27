@@ -19,6 +19,8 @@
   const TONGUE_MS = 150;
   const TONGUE_MIN_MS = 100;
   const TONGUE_MAX_MS = 250;
+  const QUICK_FLICK_RATIO = 0.6; // extra flicks at the same target are quicker
+  const QUICK_FLICK_MIN_MS = 70;
   const SCROLL_SETTLE_MS = 100;
   const SCROLL_MAX_MS = 1500;
   const SCROLL_START_GRACE_MS = 600;
@@ -310,7 +312,8 @@
     },
 
     // Flick the tongue to the element's nearest edge; onHit runs at full extension.
-    async tongueTo(element, onHit) {
+    // options.quick: a shorter flick, for extra catches at the same target.
+    async tongueTo(element, onHit, options = {}) {
       const gen = generation;
       checkAlive(gen);
 
@@ -329,10 +332,11 @@
       // At a normal landing the mouth is TONGUE_REACH plus the mouth's inset from the
       // frog's edge away from the target; that distance takes TONGUE_MS.
       const normalDistance = TONGUE_REACH + FROG_SIZE / 2 - MOUTH_OFFSET;
-      const flickMs = Math.min(
+      let flickMs = Math.min(
         Math.max((TONGUE_MS * distance) / normalDistance, TONGUE_MIN_MS),
         TONGUE_MAX_MS
       );
+      if (options.quick) flickMs = Math.max(QUICK_FLICK_MIN_MS, flickMs * QUICK_FLICK_RATIO);
 
       const tongue = addFrogbotElement("frogbot-tongue");
       tongue.style.translate = `${mouth.x}px ${mouth.y - 3}px`;
