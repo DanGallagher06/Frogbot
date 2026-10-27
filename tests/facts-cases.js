@@ -24,7 +24,7 @@
       units: ["Gross profit was $209.9 million and operating income was $84.0 million in Q3 2026."],
       expect: [
         { label: "Gross profit", display: "$209.9M", period: "Q3 2026", periodSource: "clause" },
-        { label: "Operating income", display: "$84M", period: "Q3 2026", periodSource: "clause", confidence: "high" },
+        { label: "Operating income", display: "$84.0M", period: "Q3 2026", periodSource: "clause", confidence: "high" },
       ],
     },
     {
@@ -45,7 +45,7 @@
     {
       units: ["Operating income of $84.0 million, an operating margin of 17.4%."],
       expect: [
-        { label: "Operating income", display: "$84M", role: "level" },
+        { label: "Operating income", display: "$84.0M", role: "level" },
         { label: "Operating margin", display: "17.4%", role: "level" },
       ],
     },
@@ -146,13 +146,12 @@
     {
       units: ["Revenue is expected to be $54.0 billion, plus or minus 2%."],
       expect: [
-        { label: "Guidance: Revenue", display: "$54B", role: "guidance" },
-        { label: "Guidance: Revenue", display: "2%", role: "guidance" },
+        { label: "Guidance: Revenue", display: "$54.0B ±2%", role: "guidance" },
       ],
     },
     {
       units: ["The company is raising its full-year 2026 revenue guidance to $1.86 billion."],
-      expect: [{ label: "Guidance: Revenue", display: "$1.9B", role: "guidance", period: "full-year 2026", periodSource: "clause" }],
+      expect: [{ label: "Guidance: Revenue", display: "$1.86B", role: "guidance", period: "full-year 2026", periodSource: "clause" }],
     },
     {
       // Guidance never takes the page's (backward-looking) period.
@@ -300,8 +299,7 @@
       // Nvidia's outlook bullets: the period is in the line that introduces the list.
       units: [{ text: "Revenue is expected to be $54.0 billion, plus or minus 2%.", listIntro: "NVIDIA's outlook for the third quarter of fiscal 2026 is as follows:" }],
       expect: [
-        { label: "Guidance: Revenue", display: "$54B", role: "guidance", period: "third quarter of fiscal 2026", periodSource: "listIntro", periodConfidence: "medium", showOnCard: true },
-        { display: "2%", role: "guidance", periodSource: "listIntro" },
+        { label: "Guidance: Revenue", display: "$54.0B ±2%", role: "guidance", period: "third quarter of fiscal 2026", periodSource: "listIntro", periodConfidence: "medium", showOnCard: true },
       ],
     },
     {
@@ -396,6 +394,224 @@
         { label: "Net income", display: "$47.9M", showOnCard: true },
         { label: "Net income", display: "+28%", role: "change", linked: true, showOnCard: false },
       ],
+    },
+
+    // ---- Direction: change columns ----
+    {
+      units: [{ row: ["Revenue", "$482.6", "$422.6", "+14.2%"], headers: ["", "Q3 2026", "Q3 2025", "Change"], scale: "million" }],
+      expect: [
+        { display: "$482.6M", direction: "up", directionSource: "tableColumns", sentiment: "good", changeDirection: "up" },
+        { display: "$422.6M", direction: null, sentiment: null },
+        { display: "+14.2%", role: "change", direction: "up", directionSource: "changeColumn", sentiment: "good" },
+      ],
+    },
+    {
+      // A bracketed change is a fall; lower operating expenses are good.
+      units: [{ row: ["Operating expenses", "$45.0", "$48.0", "(6.3)%"], headers: ["", "Q3 2026", "Q3 2025", "Change"], scale: "million" }],
+      expect: [
+        { label: "Operating expenses", direction: "down", sentiment: "good" },
+        { direction: null },
+        { role: "change", direction: "down", directionSource: "changeColumn", sentiment: "good" },
+      ],
+    },
+    {
+      units: [{ row: ["Net income", "$10.0", "$10.3", "-3%"], headers: ["", "Q3 2026", "Q3 2025", "Y/Y"], scale: "million" }],
+      expect: [{ direction: "down", sentiment: "bad" }, { direction: null }, { role: "change", direction: "down", directionSource: "changeColumn" }],
+    },
+    {
+      units: [{ row: ["Gross margin", "42%", "42%", "0%"], headers: ["", "Q3 2026", "Q3 2025", "Change"] }],
+      expect: [{ direction: "flat", sentiment: "neutral" }, { direction: null }, { role: "change", direction: "flat", directionSource: "changeColumn", sentiment: "neutral" }],
+    },
+    {
+      // An unsigned change column doesn't say which way; the period columns do.
+      units: [{ row: ["Revenue", "$46,743", "$30,040", "56%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" }],
+      expect: [
+        { display: "$46.7B", direction: "up", directionSource: "tableColumns", sentiment: "good" },
+        { direction: null },
+        { role: "change", direction: null, sentiment: null },
+      ],
+    },
+
+    // ---- Direction: period columns ----
+    {
+      // Current quarter against the same quarter a year earlier.
+      units: [{ row: ["GAAP net income", "$26,422", "$18,775", "$16,599"], headers: ["", "Q2 FY26", "Q1 FY26", "Q2 FY25"], scale: "million" }],
+      expect: [{ direction: "up", directionSource: "tableColumns" }, { direction: null }, { direction: null }],
+    },
+    {
+      // Year-over-year wins over sequential when they disagree.
+      units: [{ row: ["Revenue", "$100", "$110", "$90"], headers: ["", "Q2 FY26", "Q1 FY26", "Q2 FY25"], scale: "million" }],
+      expect: [{ direction: "up", directionSource: "tableColumns" }, { direction: null }, { direction: null }],
+    },
+    {
+      // The current column needn't come first.
+      units: [{ row: ["Revenue", "$10.0", "$12.0"], headers: ["", "Q3 2025", "Q3 2026"], scale: "million" }],
+      expect: [{ direction: null }, { direction: "up", directionSource: "tableColumns" }],
+    },
+    {
+      // Three months against nine months aren't comparable.
+      units: [{ row: ["Revenue", "$10.0", "$30.0"], headers: ["", "Three months ended Sept. 30, 2026", "Nine months ended Sept. 30, 2025"], scale: "million" }],
+      expect: [{ direction: null }, { direction: null }],
+    },
+    {
+      units: [{ row: ["Revenue", "$10.0", "$12.0"], headers: ["", "Actual", "Budget"], scale: "million" }],
+      expect: [{ direction: null }, { direction: null }],
+    },
+
+    // ---- Direction: signs ----
+    {
+      units: ["Revenue growth was +12.5% in the quarter."],
+      expect: [{ label: "Revenue", role: "change", direction: "up", directionSource: "sign", sentiment: "good" }],
+    },
+    {
+      units: ["Operating margin changed by -3.1% year over year."],
+      expect: [{ label: "Operating margin", role: "change", direction: "down", directionSource: "sign", sentiment: "bad" }],
+    },
+
+    // ---- Direction: change words ----
+    {
+      units: ["Revenue rose to $482.6 million, up 14.2% year over year."],
+      expect: [
+        { display: "$482.6M", direction: "up", directionSource: "verb", sentiment: "good", changeDirection: "up" },
+        { display: "14.2%", direction: "up", directionSource: "verb" },
+      ],
+    },
+    {
+      // The level takes its linked change's direction.
+      units: ["Net income fell 8% to $12 million."],
+      expect: [
+        { display: "8%", role: "change", direction: "down", directionSource: "verb", sentiment: "bad" },
+        { display: "$12M", role: "level", direction: "down", directionSource: "verb", sentiment: "bad" },
+      ],
+    },
+    { units: ["Gross margin was unchanged at 42%."], expect: [{ direction: "flat", directionSource: "verb", sentiment: "neutral" }] },
+    {
+      // A change word right after the figure.
+      units: ["Revenue was $41.1 billion, up 5% from the previous quarter."],
+      expect: [{ display: "$41.1B", direction: "up", directionSource: "verb" }, { display: "5%", direction: "up" }],
+    },
+    { units: ["Sales slipped 2% in the quarter."], expect: [{ label: "Revenue", direction: "down", sentiment: "bad" }] },
+    { units: ["Gaming revenue was a record $4.3 billion."], expect: [{ direction: "up", directionSource: "verb", sentiment: "good" }] },
+    {
+      // Rising costs are bad.
+      units: ["Operating expenses rose 12% to $3.1 billion."],
+      expect: [
+        { label: "Operating expenses", role: "change", direction: "up", sentiment: "bad" },
+        { label: "Operating expenses", role: "level", direction: "up", sentiment: "bad" },
+      ],
+    },
+    { units: ["Debt increased to $5 billion."], expect: [{ label: "Debt", direction: "up", sentiment: "bad" }] },
+    { units: ["Capital expenditure rose to $9.8 billion."], expect: [{ label: "Capital expenditure", direction: "up", sentiment: "neutral" }] },
+    { units: ["The net loss rose to $40 million."], expect: [{ direction: "up", sentiment: "bad" }] },
+    { units: ["The dividend held steady at $0.26 per share."], expect: [{ label: "Dividend", direction: "flat", sentiment: "neutral" }] },
+    {
+      units: ["S&P 500 earnings are on pace for 29.5% growth."],
+      expect: [{ label: "Earnings", role: "change", direction: "up", directionSource: "verb", sentiment: "good" }],
+    },
+    { units: ["The S&P 500 fell 0.5%."], expect: [{ display: "0.5%", direction: "down", sentiment: null }] },
+
+    // ---- Direction: negation and flipped meanings give none ----
+    { units: ["Revenue did not rise, holding at $10 billion."], expect: [{ display: "$10B", direction: null, sentiment: null }] },
+    { units: ["Net income failed to grow, coming in at $5 million."], expect: [{ display: "$5M", direction: null }] },
+    { units: ["Gross margin is no longer increasing, at 40%."], expect: [{ display: "40%", direction: null }] },
+    { units: ["The net loss narrowed to $12 million."], expect: [{ display: "$12M", direction: null, sentiment: null }] },
+    { units: ["The decline eased to 2% in the quarter."], expect: [{ display: "2%", direction: null }] },
+    { units: ["Revenue growth slowed to 3%."], expect: [{ display: "3%", direction: null }] },
+
+    // ---- Direction: from/to ----
+    {
+      units: ["Sales went from $422.6 million to $482.6 million."],
+      expect: [
+        { display: "$422.6M", direction: null },
+        { display: "$482.6M", direction: "up", directionSource: "fromTo", sentiment: "good" },
+      ],
+    },
+    {
+      units: ["Operating income was $66.3 million, from $84.0 million a year earlier."],
+      expect: [
+        { display: "$66.3M", direction: "down", directionSource: "fromTo", sentiment: "bad" },
+        { display: "$84.0M", direction: null },
+      ],
+    },
+    {
+      // The earlier value isn't linked to the change.
+      units: ["Revenue of $482.6 million, up 14.2% from $422.6 million."],
+      expect: [
+        { display: "$482.6M", direction: "up", change: "14.2%", changeDirection: "up" },
+        { display: "14.2%", role: "change", direction: "up", linked: true },
+        { display: "$422.6M", direction: null, change: null },
+      ],
+    },
+
+    // ---- Direction must stay null ----
+    { units: ["Revenue was $5 billion."], expect: [{ direction: null, directionSource: null, sentiment: null }] },
+    { units: ["The board approved buybacks of up to $5 billion."], expect: [{ display: "$5B", direction: null }] },
+    { units: ["The company held $5 billion at the end of the quarter."], expect: [{ display: "$5B", direction: null }] },
+
+    // ---- Against estimates ----
+    {
+      units: ["EPS of $1.85 beat consensus estimates."],
+      expect: [{ label: "EPS", display: "$1.85", vsEstimate: "above", sentiment: "good", direction: "up" }],
+    },
+    {
+      units: ["Revenue of $10.1 billion missed analyst estimates."],
+      expect: [{ label: "Revenue", vsEstimate: "below", sentiment: "bad" }],
+    },
+    {
+      units: ["Revenue came in 5.9% above estimates."],
+      expect: [{ label: "Revenue", vsEstimate: "above", sentiment: "good", direction: null }],
+    },
+    {
+      // Costs below consensus are good.
+      units: ["Operating expenses of $3 billion came in below consensus."],
+      expect: [{ label: "Operating expenses", vsEstimate: "below", sentiment: "good" }],
+    },
+
+    {
+      // The estimate words describe something else.
+      units: ["According to FactSet, 83% of S&P 500 companies are reporting earnings above consensus estimates, with 24% having released results."],
+      expect: [{ display: "83%" }, { display: "24%", vsEstimate: null }],
+    },
+    {
+      units: ["Meta Platforms (META) earnings came in below estimates, driven largely by a $9.89 billion charge."],
+      expect: [{ display: "$9.89B", vsEstimate: null }],
+    },
+    {
+      units: ["Revenue beat forecasts with $10.2 billion in sales."],
+      expect: [{ display: "$10.2B", vsEstimate: "above", sentiment: "good" }],
+    },
+    {
+      // A stock move isn't revenue, and isn't against estimates.
+      units: ["The second-quarter revenue forecast fell short of market estimates, yet the company's stock rose 5%."],
+      expect: [{ display: "5%", labelConfidence: "low", vsEstimate: null, direction: "up" }],
+    },
+    {
+      units: ["Our results capped off a record fiscal year, with revenue reaching $416 billion."],
+      expect: [{ display: "$416B", direction: null }],
+    },
+    {
+      units: ["TSMC reported a 35.1% year-on-year revenue increase for the quarter."],
+      expect: [{ display: "35.1%", direction: "up", directionSource: "verb" }],
+    },
+
+    // ---- Guidance tolerance ----
+    {
+      units: ["Gross margin is expected to be 73.5%, plus or minus 50 basis points."],
+      expect: [{ label: "Guidance: Gross margin", display: "73.5% ±50 bps", tolerance: "±50 bps" }],
+    },
+    {
+      units: ["GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points."],
+      expect: [
+        { label: "Guidance: GAAP gross margin", display: "73.3% ±50 bps" },
+        { label: "Guidance: Non-GAAP gross margin", display: "73.5% ±50 bps" },
+      ],
+    },
+    { units: ["Revenue is expected to be $2.0 billion ±2%."], expect: [{ display: "$2.0B ±2%", tolerance: "±2%" }] },
+    { units: ["Revenue is expected to be $2.0 billion, +/- 2%."], expect: [{ display: "$2.0B ±2%", tolerance: "±2%" }] },
+    {
+      // Only guidance has a tolerance.
+      units: ["Revenue was $5 billion, plus or minus 2% for currency."],
+      expect: [{ display: "$5B", tolerance: null }, { display: "2%" }],
     },
 
     // ---- Merging ----

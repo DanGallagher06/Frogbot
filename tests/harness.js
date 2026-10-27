@@ -267,6 +267,12 @@
     check("periodConfidence", got.periodConfidence);
     check("showOnCard", got.showOnCard);
     check("periodInferred", got.periodInferred);
+    check("direction", got.direction);
+    check("directionSource", got.directionSource);
+    check("sentiment", got.sentiment);
+    check("vsEstimate", got.vsEstimate);
+    check("tolerance", got.tolerance ? got.tolerance.display : null);
+    check("changeDirection", got.change ? got.change.direction : null);
     check("qualifiers", got.qualifiers);
     check("change", got.change ? got.change.display : null);
     check("linked", Boolean(got.linkedTo));
@@ -288,7 +294,7 @@
         if (!got[i]) return;
         for (const p of factProblems(exp, got[i])) problems.push(`fact ${i + 1} ${p}`);
       });
-      const summary = got.map((f) => `${f.label}: ${f.display} (${f.role}, ${f.period ? f.period.text : "no period"} [${f.periodSource}], label ${f.labelConfidence}, period ${f.periodConfidence}${f.showOnCard ? ", card" : ""}${f.sources.length > 1 ? `, ${f.sources.length} sources` : ""})`);
+      const summary = got.map((f) => `${f.label}: ${f.display} (${f.role}, ${f.period ? f.period.text : "no period"} [${f.periodSource}], label ${f.labelConfidence}, period ${f.periodConfidence}${f.showOnCard ? ", card" : ""}${f.direction ? `, ${f.direction} [${f.directionSource}]` : ""}${f.sentiment ? `, ${f.sentiment}` : ""}${f.vsEstimate ? `, ${f.vsEstimate} estimates` : ""}${f.sources.length > 1 ? `, ${f.sources.length} sources` : ""})`);
       const text = c.units.map((u) => (typeof u === "string" ? u : u.text || u.row.join(" | "))).join("  +  ");
       return { text, expect: c.expect, got: summary, problems, pass: problems.length === 0 };
     });

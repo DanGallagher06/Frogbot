@@ -155,7 +155,8 @@ with `--update` to save the new picks once you're happy with them.
 After picking targets, `facts.js` turns every figure it caught into a record:
 `FrogbotFacts.buildFacts(targets, blocks)`. Nothing is shown on the page yet; the records
 are for the stat card (Milestone 2). With debug on, they are logged with `console.table`
-at the end of a run (label, figure, role, period and source, both confidences, showOnCard).
+at the end of a run (label, figure, role, period and source, both confidences, showOnCard,
+direction and its source, sentiment and vsEstimate).
 
 Each record has the figure (`value`, or `low`/`high` for a range, `type`, `currency`,
 `scale`, and a short `display` like "$482.6M" or "$505M–$525M"), plus:
@@ -190,6 +191,35 @@ Each record has the figure (`value`, or `low`/`high` for a range, `type`, `curre
   period and qualifiers is merged into one record (money within 0.5%, percentages exactly),
   keeping the most confident copy, prose before tables on a tie. Different qualifiers
   (GAAP vs non-GAAP) are never merged.
+- **direction** (`up`, `down`, `flat` or null) and **directionSource**, for the card's arrows.
+  If the page doesn't make the direction plain, it is null; it is never guessed. In order:
+  - `changeColumn`: a signed or bracketed value in a table change column ("+8%", "(3)%",
+    "-3%", "0%"). An unsigned value ("56%" under "Y/Y") doesn't say which way.
+  - `sign`: a signed change figure in prose ("+12.5%").
+  - `verb`: a change word near the figure in its clause: before it (not past the previous
+    figure) or right after it ("rose", "fell", "up", "lower", "unchanged", "a record $4.3
+    billion"). A negation within three words ("did not rise", "failed to grow") or a word
+    whose meaning depends on its subject ("the loss narrowed", "growth slowed") gives null.
+  - `fromTo`: "from $X to $Y" or "$Y, from $X": the two values compared.
+  - `tableColumns`: a row with current and prior period columns whose headers match apart
+    from their dates ("Q3 2026" / "Q3 2025"); the current figure is compared with the same
+    period a year earlier, else the latest before it. Direction only, no % is computed.
+
+  A linked change passes its direction to its level (if they disagree, the level gets
+  none). The earlier value in a comparison ("up 14.2% from $422.6 million") has no direction
+  and isn't linked to the change.
+- **sentiment** (`good`, `bad`, `neutral` or null): for canonical metrics only. Up is good for
+  revenue, profits, EPS, margins, cash flow, cash, dividends and buybacks; up is bad for
+  operating expenses, debt and losses; capital expenditure is neutral; flat is neutral.
+- **vsEstimate** (`above`, `below` or null): "beat", "above consensus", "missed", "below
+  estimates" said about the figure itself. It sets the sentiment when present (costs below
+  estimates are good).
+- **tolerance**: "plus or minus 2%", "±2%", "+/- 2%" or "plus or minus 50 basis points" on a
+  guidance figure is stored as `{ value, type, display }` and added to its display
+  ("$54.0B ±2%") instead of becoming its own fact.
+
+Money displays keep the page's decimal places when the unit matches ("$54.0 billion" shows
+as "$54.0B", "$84.0" in a table "in millions" as "$84.0M").
 
 ## Measuring accuracy honestly
 
@@ -240,6 +270,11 @@ the runner skips them, so it reports "No held-out cases yet" until real ones are
 - "to" and "from" are loose change words (they match "returned $24.3 billion to
   shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
   like "from X to Y" or right after a change verb ("rose to", "fell from").
+- Direction for words whose meaning depends on their subject: a loss that "narrowed" or
+  "widened", a decline that "eased", growth that "slowed" or "accelerated". These give no
+  direction for now.
+- Direction for a change that shares an earlier change word: in "up 20% from the previous
+  quarter and 73% year-over-year", the 73% has no direction of its own yet.
 - Tighten the passive "is expected to" guidance rule to require a company subject. At the
   moment it can tag industry-wide forecasts as guidance (for example BBC's "the tech industry
   is expected to spend a combined $765bn" sentence).
@@ -273,6 +308,9 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
   - Step 10: fact records in `facts.js`: a label, role, period, label and period confidence,
     and card eligibility for each caught figure, with changes linked to their levels and
     duplicates merged (no UI yet)
+  - Step 11: change direction (from signs, change words, from/to, change columns and period
+    columns), sentiment for known metrics, beat/miss against estimates, and guidance
+    tolerances (no UI yet)
 - **Milestone 3: AI summary (not started).** A short summary written only from the chosen
   sentences, with a check that every number in the summary appears on the page. On-device AI
   where the browser has it, and a rules-only fallback otherwise.

@@ -64,6 +64,11 @@ RUNNER = """
         confidence: f.confidence,
         showOnCard: f.showOnCard,
         periodInferred: f.periodInferred,
+        direction: f.direction,
+        directionSource: f.directionSource,
+        sentiment: f.sentiment,
+        vsEstimate: f.vsEstimate,
+        tolerance: f.tolerance ? f.tolerance.display : null,
         sources: f.sources.length,
       })),
     });
@@ -111,7 +116,7 @@ def describe_fact_changes(old: list, new: list) -> list:
         if before is None:
             lines.append(f"  + new fact     {f['label']}: {f['display']} ({f['role']}, {f['period']}, {f['confidence']})")
         elif before != f:
-            brief = lambda x: f"{x['period']}/{x.get('labelConfidence')}+{x.get('periodConfidence')}/{'card' if x.get('showOnCard') else 'no card'}/{x['sources']}"
+            brief = lambda x: f"{x['period']}/{x.get('labelConfidence')}+{x.get('periodConfidence')}/{'card' if x.get('showOnCard') else 'no card'}/{x.get('direction')}:{x.get('sentiment')}/{x['sources']}"
             lines.append(f"  ~ changed      {f['label']}: {f['display']} ({brief(before)} -> {brief(f)})")
     for f in old:
         if key(f) not in new_keys:

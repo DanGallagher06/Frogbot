@@ -376,6 +376,9 @@
         labelConfidence: f.labelConfidence,
         periodConfidence: f.periodConfidence || "none",
         showOnCard: f.showOnCard,
+        direction: f.direction ? `${f.direction} (${f.directionSource})` : "none",
+        sentiment: f.sentiment || "none",
+        vsEstimate: f.vsEstimate || "none",
         sources: f.sources.length,
       }))
     );

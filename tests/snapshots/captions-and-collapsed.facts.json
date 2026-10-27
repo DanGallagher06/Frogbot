@@ -10,6 +10,11 @@
     "confidence": "low",
     "showOnCard": false,
     "periodInferred": true,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -23,6 +28,11 @@
     "confidence": "low",
     "showOnCard": false,
     "periodInferred": false,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -36,6 +46,11 @@
     "confidence": "low",
     "showOnCard": false,
     "periodInferred": false,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -49,6 +64,11 @@
     "confidence": "medium",
     "showOnCard": true,
     "periodInferred": false,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -62,6 +82,11 @@
     "confidence": "low",
     "showOnCard": false,
     "periodInferred": true,
+    "direction": "up",
+    "directionSource": "verb",
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -75,6 +100,11 @@
     "confidence": "low",
     "showOnCard": true,
     "periodInferred": true,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": "good",
+    "vsEstimate": "above",
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -88,6 +118,11 @@
     "confidence": "low",
     "showOnCard": true,
     "periodInferred": true,
+    "direction": "up",
+    "directionSource": "verb",
+    "sentiment": "good",
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -101,6 +136,11 @@
     "confidence": "high",
     "showOnCard": true,
     "periodInferred": false,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   },
   {
@@ -114,6 +154,11 @@
     "confidence": "high",
     "showOnCard": true,
     "periodInferred": false,
+    "direction": null,
+    "directionSource": null,
+    "sentiment": null,
+    "vsEstimate": null,
+    "tolerance": null,
     "sources": 1
   }
 ]

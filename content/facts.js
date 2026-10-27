@@ -71,8 +71,30 @@
   const ESTIMATE_SUBJECT = /\b(?:analysts?|Wall Street|the Street|economists?|forecasters?)\b[^.;,]{0,40}$/i;
   const ESTIMATE_DIRECT = /\b(?:consensus|estimates?|expectations?|forecasts?)\s+(?:estimates?\s+)?(?:of|for|at|was|were|is|stood at|calls? for|called for)\s+(?:about\s+|around\s+|approximately\s+|roughly\s+)?$/i;
   const ESTIMATE_AFTER = /^\s*(?:consensus|analyst|estimate|expectation|expected by analysts)/i;
-  const CLAUSE_BREAK = /;|:\s|,\s*(?:and|but|while|whereas|although|though)\s|\s(?:while|whereas|but)\s/gi;
+  const CLAUSE_BREAK = /;|:\s|,\s*(?:and|but|yet|while|whereas|although|though)\s|\s(?:while|whereas|but)\s/gi;
   const COMPARISON_MARKER = /over|on[\s-]year|sequential|yoy|qoq|[yq]\/[yq]/i;
+
+  // Direction (step 11). A word must make the direction plain; anything else gives none.
+  // "Flip" words change meaning with their subject ("the loss narrowed", "the decline
+  // eased"), so for now they give no direction either.
+  const UP_WORD = /^(?:rose|rise|rises|rising|grew|grow|grows|growing|growth|increased|increase|increases|increasing|jumped|jump|jumps|climbed|climb|climbs|surged|surge|surges|gained|gain|gains|improved|improve|improves|expanded|expand|expands|up|higher|beat|beats|topped|tops|exceeded|exceeds|record)$/i;
+  const DOWN_WORD = /^(?:fell|fall|falls|falling|declined|decline|declines|declining|decreased|decrease|decreases|dropped|drop|drops|slipped|slips|slid|slide|slides|shrank|shrink|shrinks|shrunk|contracted|contracts|contraction|down|lower|missed|miss|misses)$/i;
+  const FLAT_WORD = /^(?:unchanged|flat|steady|stable)$/i;
+  const FLIP_WORD = /^(?:narrowed|narrowing|narrows|widened|widening|widens|eased|easing|eases|moderated|moderating|softened|softening|slowed|slowing|slows|deepened|deepening|accelerated|accelerating|decelerated|decelerating)$/i;
+  const NEGATION = /^(?:not|no|never|without|failed|fail|fails|longer|cannot)$|n['’]t$/i;
+  // The earlier value in a comparison: "up 14.2% from $422.6 million".
+  const PRIOR_BEFORE = /\b(?:from|compared (?:with|to)|versus|vs\.?|against)\s+(?:about\s+|approximately\s+|roughly\s+|around\s+)?$/i;
+  const TOLERANCE_BEFORE = /(?:plus or minus|\+\/-|\+\/−|±)\s*$/i;
+  const ESTIMATE_NOUN = String.raw`(?:consensus|estimates?|expectations?|forecasts?|analysts?|the Street|Wall Street)`;
+  const ABOVE_ESTIMATE = new RegExp(String.raw`\b(?:beat|beats|beating)\b|\b(?:above|ahead of|topped|exceeded|surpassed)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
+  const BELOW_ESTIMATE = new RegExp(String.raw`\b(?:missed|misses|missing)\b|\b(?:below|short of|behind)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
+  // Sentiment: which way is good, for canonical metrics only.
+  const UP_IS_GOOD = new Set([
+    "Revenue", "Gross profit", "Operating income", "Net income", "Profit", "Earnings", "EPS", "Gross margin",
+    "Operating margin", "Margin", "Free cash flow", "Operating cash flow", "Cash", "Dividend", "Buyback",
+  ]);
+  const UP_IS_BAD = new Set(["Operating expenses", "Debt"]);
+  const NEUTRAL_METRIC = new Set(["Capital expenditure"]);
 
   const CURRENCY_SYMBOL = { USD: "$", GBP: "£", EUR: "€", JPY: "¥", INR: "₹", CAD: "C$", AUD: "A$", HKD: "HK$" };
   const SCALE_FACTOR = { thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
@@ -184,19 +206,19 @@
     return CURRENCY_SYMBOL[currency] || `${currency} `;
   }
 
-  function formatMoney(v, currency, perShare, decimals = 1) {
+  function formatMoney(v, currency, perShare, decimals = null) {
     const sign = v < 0 ? "−" : "";
     const a = Math.abs(v);
     const sym = symbol(currency);
     if (perShare) return `${sign}${sym}${a.toFixed(2)}`;
-    const one = (x) => (decimals === 1 ? x.toFixed(1).replace(/\.0$/, "") : x.toFixed(decimals));
+    const one = (x) => (decimals == null ? x.toFixed(1).replace(/\.0$/, "") : x.toFixed(decimals));
     if (a >= 1e12) return `${sign}${sym}${one(a / 1e12)}T`;
     if (a >= 1e9) return `${sign}${sym}${one(a / 1e9)}B`;
     if (a >= 1e6) return `${sign}${sym}${one(a / 1e6)}M`;
     return `${sign}${sym}${a.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
   }
 
-  function formatValue(v, f, decimals = 1) {
+  function formatValue(v, f, decimals = null) {
     if (f.type === "money" || f.type === "perShare") return formatMoney(v, f.currency, f.perShare, decimals);
     const sign = f.signed && v > 0 ? "+" : v < 0 ? "−" : "";
     const a = Math.abs(v);
@@ -217,7 +239,19 @@
       }
       return `${lo}–${hi}`;
     }
-    return formatValue(f.value, f);
+    return formatValue(f.value, f, pagePlaces(f));
+  }
+
+  // Decimal places as the page wrote them ("$54.0 billion" -> "$54.0B"), when the display
+  // unit is the unit the page used.
+  function pagePlaces(f) {
+    if (f.type !== "money" || !f.scale) return null;
+    const m = f.raw.match(/\d[\d,]*(?:\.(\d+))?/);
+    const places = m && m[1] ? m[1].length : 0;
+    if (!places || places > 2) return null;
+    const a = Math.abs(f.value);
+    const unit = a >= 1e12 ? 1e12 : a >= 1e9 ? 1e9 : a >= 1e6 ? 1e6 : null;
+    return unit === SCALE_FACTOR[f.scale] ? places : null;
   }
 
   // Same figure for merging: money compares significant digits within 0.5% (a table's
@@ -270,6 +304,11 @@
       confidence: "low",
       periodInferred: false,
       showOnCard: false,
+      direction: null,
+      directionSource: null,
+      sentiment: null,
+      vsEstimate: null,
+      tolerance: null,
       kind: unit.kind,
       signed: /^\+/.test(n.raw),
       _unit: unit,
@@ -283,21 +322,34 @@
     const periods = numbers.filter(isPeriodNumber);
     const isGuidance = Score.topicOf(text) === "guidance/outlook/forecast";
     const facts = [];
+    const tolerances = [];
 
     groups.forEach((group, gi) => {
       const n = group.figure;
-      const f = baseFact(unit, n, ctx);
       const ci = clauseIndex(ranges, n.start);
       const [cs, ce] = ranges[ci];
       const before = text.slice(cs, n.start);
       const after = text.slice(n.end, ce);
+      // "plus or minus 2%" on a guidance figure is its tolerance, not a fact of its own.
+      if (isGuidance && gi > 0 && (n.type === "percent" || n.type === "basisPoints") && (/^±/.test(n.raw) || TOLERANCE_BEFORE.test(before))) {
+        tolerances.push({ n, ci });
+        return;
+      }
+      const f = baseFact(unit, n, ctx);
+      // The text between this figure and its neighbours in the clause.
+      const prevEnd = Math.max(cs, ...groups.map((g) => g.figure.end).filter((e) => e <= n.start));
+      const nextStart = Math.min(ce, ...groups.map((g) => g.figure.start).filter((st) => st >= n.end));
+      const near = text.slice(prevEnd, n.start);
+      const nearAfter = text.slice(n.end, nextStart);
 
       // Label: the nearest finance term before the figure in its clause, else in an earlier
       // clause of the sentence (medium), else a guidance metric, else a snippet (low).
       let labelSource = "term";
       let term = termBefore(text, cs, n.start);
       if (!term) {
-        term = termBefore(text, 0, cs);
+        // A clause about the stock doesn't borrow an earlier clause's metric ("revenue
+        // forecast fell short, yet the stock rose 5%").
+        term = /\b(?:stock|shares|share price)\b/i.test(before) ? null : termBefore(text, 0, cs);
         labelSource = term ? "sentence" : "fallback";
       }
       let qualifiers = term ? qualifiersBefore(text, term.start >= cs ? cs : 0, term.start) : [];
@@ -328,6 +380,8 @@
 
       // Label text.
       const base = term ? term.label : null;
+      f._base = base;
+      f._loss = Boolean(term && /\b(?:loss|losses|deficit)\b/i.test(text.slice(term.start, term.end)));
       if (base) {
         f.label = labelFrom(qualifiers, base);
         f.topic = TOPIC_OF_LABEL[base] || "other";
@@ -368,21 +422,112 @@
         f.periodSource = "page";
       }
 
+      // Direction: an explicit sign, a change word, or "from $X to $Y". The earlier value in
+      // a comparison has none of its own.
+      f._prior = f.role === "level" && PRIOR_BEFORE.test(near);
+      if (!f._prior) {
+        const words = directionFromWords(near, nearAfter);
+        if (f.role === "change" && /^[+]/.test(n.raw)) setDirection(f, "up", "sign");
+        else if (f.role === "change" && /^[-−]/.test(n.raw)) setDirection(f, "down", "sign");
+        else if (words.blocked) f._dirBlocked = true;
+        else if (words.direction) setDirection(f, words.direction, "verb");
+        else {
+          const other = fromToPartner(text, groups, group, cs, ce);
+          if (other && comparable(n, other)) setDirection(f, compare(n.value, other.value), "fromTo");
+        }
+      }
+      // Against estimates: the words must be about this figure, so after it, or before it
+      // with no comma in between ("Revenue beat estimates at $10B", not "earnings were above
+      // estimates, with 24% having reported").
+      if (base && f.role !== "estimate" && f.role !== "guidance") {
+        const vs = (re) => re.test(nearAfter) || (re.test(near) && !/,/.test(near.slice(near.search(re))));
+        if (vs(ABOVE_ESTIMATE)) f.vsEstimate = "above";
+        else if (vs(BELOW_ESTIMATE)) f.vsEstimate = "below";
+      }
+
       f._labelSource = labelSource;
       f._clause = ci;
       facts.push(f);
     });
 
-    // Changes link to the level in the same clause with the same label.
+    // Tolerances attach to the guidance figures before them in their clause ("73.3% and
+    // 73.5%, respectively, plus or minus 50 basis points"), else the nearest one before.
+    for (const t of tolerances) {
+      const open = facts.filter((f) => f.role === "guidance" && !f.tolerance && f._n.start < t.n.start);
+      const inClause = open.filter((f) => f._clause === t.ci);
+      const targets = inClause.length ? inClause : open.slice(-1);
+      const value = Math.abs(t.n.value);
+      const tolerance = { value, type: t.n.type, display: t.n.type === "percent" ? `±${value}%` : `±${value} bps` };
+      for (const f of targets) f.tolerance = tolerance;
+    }
+
+    // Changes link to the level in the same clause with the same label (not an earlier value
+    // it's compared with).
     for (const c of facts) {
       if (c.role !== "change") continue;
       const level = facts
-        .filter((l) => l.role === "level" && l._clause === c._clause && l.label === c.label)
+        .filter((l) => l.role === "level" && !l._prior && l._clause === c._clause && l.label === c.label)
         .sort((a, b) => Math.abs(a._n.start - c._n.start) - Math.abs(b._n.start - c._n.start))[0];
       if (level) link(level, c);
     }
     return facts;
   }
+
+  function setDirection(f, direction, source) {
+    f.direction = direction;
+    f.directionSource = direction ? source : null;
+  }
+  const compare = (now, before) => (now > before ? "up" : now < before ? "down" : "flat");
+  const wordsOf = (s) => s.match(/[A-Za-z][A-Za-z'’]*/g) || [];
+
+  function wordKind(word, next) {
+    if (FLIP_WORD.test(word)) return "flip";
+    if (/^up$/i.test(word) && next && /^to$/i.test(next)) return null; // "up to $5 billion" is a limit
+    if (/^held$/i.test(word)) return next && /^(?:steady|flat|unchanged|stable|at)$/i.test(next) ? "flat" : null;
+    if (UP_WORD.test(word)) return "up";
+    if (DOWN_WORD.test(word)) return "down";
+    if (FLAT_WORD.test(word)) return "flat";
+    return null;
+  }
+
+  // The nearest change word before the figure (up to 10 words back, not past the previous
+  // figure), else one of the two words right after it. A negation in the three words before
+  // the change word, or a flip word, blocks a direction.
+  function directionFromWords(before, after) {
+    const words = wordsOf(before).slice(-10);
+    for (let i = words.length - 1; i >= 0; i--) {
+      const kind = wordKind(words[i], words[i + 1]);
+      if (!kind) continue;
+      // "record" describes the figure only when it's next to it ("a record $4.3 billion",
+      // "record revenue of"), not "a record fiscal year, with revenue reaching".
+      if (/^record$/i.test(words[i]) && i < words.length - 3) continue;
+      if (kind === "flip" || words.slice(Math.max(0, i - 3), i).some((w) => NEGATION.test(w))) return { blocked: true };
+      return { direction: kind };
+    }
+    // Comparison words don't count towards the two: "35.1% year-on-year revenue increase".
+    const next = wordsOf(after).filter((w, i, all) => !all.slice(0, i + 1).every((x) => /^(?:year|quarter|over|on|to|date)$/i.test(x))).slice(0, 2);
+    for (let i = 0; i < next.length; i++) {
+      const kind = wordKind(next[i], next[i + 1]);
+      if (kind === "flip") return { blocked: true };
+      if (kind) return { direction: kind };
+    }
+    return {};
+  }
+
+  // The earlier value for "from $X to $Y" (when the figure is $Y) or "to $Y from $X".
+  function fromToPartner(text, groups, group, cs, ce) {
+    const i = groups.indexOf(group);
+    const n = group.figure;
+    const prev = groups[i - 1] && groups[i - 1].figure;
+    const next = groups[i + 1] && groups[i + 1].figure;
+    if (prev && prev.start >= cs && /^\s*to\s+(?:about\s+)?$/i.test(text.slice(prev.end, n.start)) && /\bfrom\s+(?:about\s+)?$/i.test(text.slice(cs, prev.start))) {
+      return prev;
+    }
+    if (next && next.end <= ce && /^\s*,?\s*(?:up |down )?from\s+(?:about\s+)?$/i.test(text.slice(n.end, next.start))) return next;
+    return null;
+  }
+  const comparable = (a, b) =>
+    a.type === b.type && (a.currency || null) === (b.currency || null) && typeof a.value === "number" && typeof b.value === "number";
 
   function isChange(n, before, after) {
     if (n.type === "multiple") return false;
@@ -422,6 +567,8 @@
       }
       f.qualifiers = qualifiers;
       f._labelSource = rowHeader ? "row" : "fallback";
+      f._base = base;
+      f._loss = Boolean(rowHeader && /\b(?:loss|losses|deficit)\b/i.test(rowHeader));
 
       if (/^[+\-−]/.test(n.raw) || (header && CHANGE_HEADER.test(header) && !Score.detectNumbers(header).some(isPeriodNumber))) {
         f.role = "change";
@@ -459,10 +606,68 @@
       facts.push(f);
     }
 
+    // Change columns: a signed or bracketed value says which way ("+8%", "(3)%", "-3%", "0%").
+    for (const c of facts) {
+      if (c.role !== "change") continue;
+      if (/^\+/.test(c.raw) && c.value > 0) setDirection(c, "up", "changeColumn");
+      else if (c.value < 0 || /^[-−(]/.test(c.raw)) setDirection(c, "down", "changeColumn");
+      else if (c.value === 0) setDirection(c, "flat", "changeColumn");
+    }
+    tableColumnDirection(facts);
+
     // Row changes ("+14.2%" under "Change") link to the row's first level (the current period).
     const firstLevel = facts.find((x) => x.role === "level");
     for (const c of facts) if (c.role === "change" && firstLevel) link(firstLevel, c);
     return facts;
+  }
+
+  // A row with current and prior period columns ("Q3 2026" and "Q3 2025"): the current
+  // figure's direction is how it compares with the prior one (the same period a year earlier
+  // if there is one, else the latest before it). Only when the headers are the same apart
+  // from their dates, so they clearly name comparable periods.
+  function tableColumnDirection(facts) {
+    const levels = facts
+      .filter((f) => f.role === "level" && f.periodSource === "table")
+      .map((f) => ({ f, p: columnPeriod(f.period.text) }))
+      .filter((x) => x.p);
+    if (levels.length < 2) return;
+    const current = levels.reduce((a, b) => (b.p.key > a.p.key ? b : a));
+    if (levels.filter((x) => x.p.key === current.p.key).length > 1) return;
+    const same = levels.filter((x) => x !== current && x.p.shape === current.p.shape && x.p.key < current.p.key);
+    if (!same.length) return;
+    const prior = same.find((x) => x.p.key === current.p.key - 4) || same.reduce((a, b) => (b.p.key > a.p.key ? b : a));
+    if (!comparable(current.f, prior.f)) return;
+    setDirection(current.f, compare(current.f.value, prior.f.value), "tableColumns");
+  }
+
+  const ORDINAL_QUARTER = { first: 1, second: 2, third: 3, fourth: 4 };
+  const MONTHS = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/g;
+  function columnPeriod(text) {
+    const t = collapse(text).toLowerCase();
+    let q = null;
+    let m = t.match(/\bq([1-4])\b/) || t.match(/\b([1-4])q\b/);
+    if (m) q = Number(m[1]);
+    m = t.match(/\b(first|second|third|fourth)[\s-]quarter\b/);
+    if (m) q = ORDINAL_QUARTER[m[1]];
+    m = t.match(/\b(?:fy|fiscal(?: year)?)\s*['’]?(\d{4}|\d{2})\b/) || t.match(/\b((?:19|20)\d{2})\b/) || t.match(/['’](\d{2})\b/);
+    if (!m) return null;
+    const year = m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1]);
+    // Headers must match apart from their numbers and months: "Q2 FY26" / "Q1 FY26".
+    const shape = t.replace(MONTHS, "M").replace(/\d+/g, "#");
+    return { year, q, key: year * 4 + (q || 0), shape };
+  }
+
+  // Sentiment for canonical metrics: which way is good. Unknown metrics get none.
+  function sentimentOf(f) {
+    const polarity = f._loss ? "bad" : UP_IS_GOOD.has(f._base) ? "good" : UP_IS_BAD.has(f._base) ? "bad" : NEUTRAL_METRIC.has(f._base) ? "neutral" : null;
+    if (!polarity) return null;
+    if (f.vsEstimate && polarity !== "neutral") {
+      const beat = f.vsEstimate === "above";
+      return beat === (polarity === "good") ? "good" : "bad";
+    }
+    if (!f.direction) return null;
+    if (f.direction === "flat" || polarity === "neutral") return "neutral";
+    return (f.direction === "up") === (polarity === "good") ? "good" : "bad";
   }
 
   // high: a table row header, or a finance term in the figure's own clause with nothing
@@ -543,7 +748,7 @@
     const all = units.flatMap((unit) => factsFromUnit(unit, ctx));
 
     for (const f of all) {
-      f.display = display(f);
+      f.display = display(f) + (f.tolerance ? ` ${f.tolerance.display}` : "");
       f.labelConfidence = labelConfidenceOf(f);
       f.periodConfidence = f.periodSource ? PERIOD_CONFIDENCE[f.periodSource] : null;
       // Overall: the lower of the two (a missing period doesn't lower it).
@@ -586,10 +791,27 @@
     kept.forEach((f, i) => {
       f.id = `f${i + 1}`;
     });
+    // A linked change passes its direction to its level. If the level's own wording or
+    // columns disagree, or a negation blocked it, the level gets none.
+    for (const f of kept) {
+      const change = resolve(f._changeOf);
+      if (!change || !kept.includes(change) || !change.direction || f._dirBlocked) continue;
+      if (f.direction && f.direction !== change.direction) setDirection(f, null, null);
+      else if (!f.direction) setDirection(f, change.direction, change.directionSource);
+    }
+    for (const f of kept) f.sentiment = sentimentOf(f);
     for (const f of kept) {
       const change = resolve(f._changeOf);
       if (change && kept.includes(change)) {
-        f.change = { value: change.value, type: change.type, display: change.display, factId: change.id };
+        f.change = {
+          value: change.value,
+          type: change.type,
+          display: change.display,
+          factId: change.id,
+          direction: change.direction,
+          directionSource: change.directionSource,
+          sentiment: change.sentiment,
+        };
       }
       const level = resolve(f._linkedTo);
       if (level && kept.includes(level)) f.linkedTo = level.id;
@@ -601,7 +823,8 @@
       const roleOk = f.role === "level" || f.role === "guidance" || (f.role === "change" && !f.linkedTo);
       f.showOnCard = f.labelConfidence !== "low" && roleOk;
     }
-    return kept.map(({ _unit, _n, _labelSource, _clause, _changeOf, _linkedTo, _mergedInto, kind, perShare, signed, ...rest }) => rest);
+    const internal = new Set(["kind", "perShare", "signed"]);
+    return kept.map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_") && !internal.has(k))));
   }
 
   const FrogbotFacts = { buildFacts, dominantPeriod };
