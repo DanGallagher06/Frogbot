@@ -390,8 +390,8 @@
       // Linked changes sit with their level, in tables too.
       units: [{ row: ["Net income", "$61.3", "$47.9", "+28.0%"], headers: ["", "Q3 2026", "Q3 2025", "Change"], scale: "million" }],
       expect: [
-        { label: "Net income", display: "$61.3M", showOnCard: true },
-        { label: "Net income", display: "$47.9M", showOnCard: true },
+        { label: "Net income", display: "$61.3M", showOnCard: true, prior: "$47.9M in Q3 2025" },
+        { label: "Net income", display: "$47.9M", showOnCard: false, priorPeriod: true },
         { label: "Net income", display: "+28%", role: "change", linked: true, showOnCard: false },
       ],
     },
@@ -432,6 +432,109 @@
       ],
     },
 
+    // ---- Direction: unsigned change columns (step 12) ----
+    {
+      // Falls are shown in brackets on this page and the columns agree: unsigned means up.
+      units: [{ row: ["GAAP net income", "$26,422", "$18,775", "$16,599", "41%", "59%"], headers: ["", "Q2 FY26", "Q1 FY26", "Q2 FY25", "Q/Q", "Y/Y"], scale: "million" }],
+      context: { negativesShown: true },
+      expect: [
+        { direction: "up", directionSource: "tableColumns" },
+        { direction: null },
+        { direction: null },
+        { display: "41%", role: "change", direction: "up", directionSource: "changeColumn", sentiment: "good" },
+        { display: "59%", role: "change", direction: "up", directionSource: "changeColumn" },
+      ],
+    },
+    {
+      // A bracketed fall in another row of the run counts as the page showing its falls.
+      units: [
+        { row: ["Operating expenses", "$4,000", "$4,100", "(2)%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" },
+        { row: ["Revenue", "$46,743", "$30,040", "56%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" },
+      ],
+      expect: [
+        { direction: "down" },
+        { direction: null },
+        { role: "change", direction: "down" },
+        { display: "$46.7B", direction: "up" },
+        { direction: null },
+        { display: "56%", role: "change", direction: "up", directionSource: "changeColumn" },
+      ],
+    },
+    {
+      // No sign of how falls are written: unsigned stays unknown.
+      units: [{ row: ["Revenue", "$46,743", "$30,040", "56%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" }],
+      context: { negativesShown: false },
+      expect: [{ direction: "up" }, { direction: null }, { role: "change", direction: null }],
+    },
+    {
+      // The Q/Q column compares with last quarter, which was higher: no direction.
+      units: [{ row: ["Revenue", "$100", "$110", "$90", "9%", "11%"], headers: ["", "Q2 FY26", "Q1 FY26", "Q2 FY25", "Q/Q", "Y/Y"], scale: "million" }],
+      context: { negativesShown: true },
+      expect: [
+        { direction: "up" },
+        { direction: null },
+        { direction: null },
+        { display: "9%", role: "change", direction: null },
+        { display: "11%", role: "change", direction: "up", directionSource: "changeColumn" },
+      ],
+    },
+
+    {
+      // Nvidia-style falls: "(2.7) pts", and "(62" with its bracket closed in the next cell.
+      units: [
+        { row: ["Gross margin", "72.4%", "75.1%", "(2.7) pts"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"] },
+        { row: ["Revenue", "$46,743", "$30,040", "56%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" },
+      ],
+      expect: [{ direction: "down" }, { direction: null }, {}, { direction: "up" }, { direction: null }, { display: "56%", direction: "up", directionSource: "changeColumn" }],
+    },
+    {
+      // A footnote marker "(1)" isn't a fall.
+      units: [
+        { row: ["Other items", "(1)", "$5", "$4"], headers: ["", "Note", "Q2 FY26", "Q2 FY25"], scale: "million" },
+        { row: ["Revenue", "$46,743", "$30,040", "56%"], headers: ["", "Q2 FY26", "Q2 FY25", "Y/Y"], scale: "million" },
+      ],
+      expect: [{}, {}, { display: "$46.7B", direction: "up" }, { direction: null }, { display: "56%", direction: null }],
+    },
+
+    // ---- Direction: "up from" / "down from" (step 12) ----
+    {
+      units: ["Revenue was $5.2 billion, up from $4.8 billion."],
+      expect: [
+        { display: "$5.2B", direction: "up", directionSource: "fromTo", sentiment: "good" },
+        { display: "$4.8B", direction: null },
+      ],
+    },
+    {
+      units: ["Operating expenses were $3.1 billion, down from $3.5 billion."],
+      expect: [{ display: "$3.1B", direction: "down", directionSource: "fromTo", sentiment: "good" }, { display: "$3.5B", direction: null }],
+    },
+    {
+      // The values contradict the words: no direction.
+      units: ["Revenue was $4.5 billion, up from $4.8 billion."],
+      expect: [{ display: "$4.5B", direction: null, sentiment: null }, { display: "$4.8B", direction: null }],
+    },
+
+    // ---- Prior-period columns (step 12 tweaks) ----
+    {
+      // Earlier columns stay off the card; the current figure carries the year-ago one.
+      units: [{ row: ["GAAP net income", "$26,422", "$18,775", "$16,599"], headers: ["", "Q2 FY26", "Q1 FY26", "Q2 FY25"], scale: "million" }],
+      expect: [
+        { display: "$26.4B", showOnCard: true, priorPeriod: false, prior: "$16.6B in Q2 FY25" },
+        { display: "$18.8B", showOnCard: false, priorPeriod: true, prior: null },
+        { display: "$16.6B", showOnCard: false, priorPeriod: true },
+      ],
+    },
+    {
+      // No year-ago column: the previous quarter is the comparison.
+      units: [{ row: ["Revenue", "$46,743", "$44,062"], headers: ["", "Q2 FY26", "Q1 FY26"], scale: "million" }],
+      expect: [{ prior: "$44.1B in Q1 FY26", direction: "up" }, { priorPeriod: true, showOnCard: false }],
+    },
+    {
+      // Headers that aren't comparable periods: no prior columns.
+      units: [{ row: ["Revenue", "$10.0", "$30.0"], headers: ["", "Three months ended Sept. 30, 2026", "Nine months ended Sept. 30, 2025"], scale: "million" }],
+      expect: [{ priorPeriod: false, prior: null, showOnCard: true }, { priorPeriod: false, showOnCard: true }],
+    },
+
     // ---- Direction: period columns ----
     {
       // Current quarter against the same quarter a year earlier.
@@ -466,6 +569,16 @@
     {
       units: ["Operating margin changed by -3.1% year over year."],
       expect: [{ label: "Operating margin", role: "change", direction: "down", directionSource: "sign", sentiment: "bad" }],
+    },
+
+    {
+      // The level shows a percentage change over an amount.
+      units: ["Revenue was a record $68.1 billion, exceeding guidance by approximately $3 billion, up 20% from the previous quarter."],
+      expect: [
+        { display: "$68.1B", change: "20%" },
+        { display: "$3B", linked: true },
+        { display: "20%", linked: true },
+      ],
     },
 
     // ---- Direction: change words ----
@@ -570,7 +683,10 @@
     {
       // The estimate words describe something else.
       units: ["According to FactSet, 83% of S&P 500 companies are reporting earnings above consensus estimates, with 24% having released results."],
-      expect: [{ display: "83%" }, { display: "24%", vsEstimate: null }],
+      expect: [
+        { display: "83%", label: "of S&P 500 companies are", labelConfidence: "low", showOnCard: false },
+        { display: "24%", label: "having released results", labelConfidence: "low", vsEstimate: null, showOnCard: false },
+      ],
     },
     {
       units: ["Meta Platforms (META) earnings came in below estimates, driven largely by a $9.89 billion charge."],
@@ -592,6 +708,34 @@
     {
       units: ["TSMC reported a 35.1% year-on-year revenue increase for the quarter."],
       expect: [{ display: "35.1%", direction: "up", directionSource: "verb" }],
+    },
+
+    // ---- Shares of a group of companies (step 12) ----
+    { units: ["So far, 78% of companies have beaten earnings estimates."], expect: [{ display: "78%", labelConfidence: "low", showOnCard: false }] },
+    {
+      // A real metric percentage in the same sentence keeps its label.
+      units: ["Revenue grew 12% in the quarter, and 70% of companies beat estimates."],
+      expect: [
+        { label: "Revenue", display: "12%", labelConfidence: "high", direction: "up" },
+        { display: "70%", label: "of companies beat estimates", labelConfidence: "low" },
+      ],
+    },
+    {
+      units: ["The blended earnings growth rate is 29.5%, with 24% of companies having reported."],
+      expect: [
+        { label: "Earnings", display: "29.5%", labelConfidence: "high" },
+        { display: "24%", labelConfidence: "low", showOnCard: false },
+      ],
+    },
+    {
+      // An average beside a share of companies is a share too.
+      units: ["So far, 83% of them have beaten analyst estimates for earnings per share, above the five-year average of 78%."],
+      expect: [{ display: "83%", labelConfidence: "low" }, { display: "78%", label: "above the five-year average of", labelConfidence: "low", showOnCard: false }],
+    },
+    {
+      // "of" a metric isn't a group.
+      units: ["Gross margin was 42% of revenue."],
+      expect: [{ label: "Gross margin", display: "42%", labelConfidence: "high" }],
     },
 
     // ---- Guidance tolerance ----

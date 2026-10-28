@@ -1,14 +1,21 @@
-// Frogbot: entry point, injected after frog.js, highlight.js, extract.js and score.js each time
-// "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
+// Frogbot: entry point, injected after frog.js, highlight.js, extract.js, score.js, facts.js
+// and card.js each time "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
 (() => {
   const Frogbot = window.Frogbot;
   const Highlight = window.FrogbotHighlight;
   const Extract = window.FrogbotExtract;
   const Score = window.FrogbotScore;
   const Facts = window.FrogbotFacts;
+  const Card = window.FrogbotCard;
 
-  // Guard against double injection: one frog (and one run) at a time.
-  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || Frogbot.isShowing()) return;
+  // One run at a time: releasing again mid-run does nothing. Once a run has finished, its
+  // frog, card and highlights make way for the new run.
+  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || !Card) return;
+  if (Frogbot.isShowing()) {
+    if (window.__frogbotRunning) return;
+    Frogbot.remove();
+  }
+  window.__frogbotRunning = true;
 
   const debug = window.__frogbotDebug === true;
   const FROG_SIZE = 60;
@@ -18,6 +25,7 @@
   const MAX_ABOVE_CONTAINER = 80; // how far above the main container the frog may start
   const SEARCH_STEP = 20; // grid spacing when looking for a clear start spot
   const SITE_HEADERS = "header, [role='banner']";
+  const CARD_PERCH = { dx: 6, dy: -16 }; // the frog's spot relative to the card's top-left corner
 
   let cancelled = false;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -362,7 +370,28 @@
       await sleep(400);
     }
     if (debug) logFacts(facts);
-    // The frog stays at the last target; highlights stay until Escape.
+    // With figures caught, the frog delivers the stat card; otherwise it stays at the last
+    // target. Highlights stay until Escape.
+    if (facts.length) await deliverCard();
+    window.__frogbotRunning = false;
+  }
+
+  // The frog hops to the bottom-right corner, perches on the card's top-left corner and
+  // drops the card from its mouth. Both stay put while the page scrolls.
+  async function deliverCard() {
+    if (cancelled) return;
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove() });
+    const rect = Card.rect();
+    const perch = {
+      x: Math.max(rect.left + CARD_PERCH.dx, FROG_SIZE / 2 + 4),
+      y: Math.max(rect.top + CARD_PERCH.dy, FROG_SIZE / 2 + 4),
+    };
+    await Frogbot.hopToFixed(perch);
+    if (cancelled) return;
+    await Frogbot.faceTowards(perch.x, perch.y + FROG_SIZE); // face down onto the card
+    if (cancelled) return;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    await Card.reveal({ origin: Frogbot.mouthPosition(), animate: !reduced });
   }
 
   // Debug only: the fact records built from this run's targets.
@@ -409,11 +438,14 @@
   // data-frogbot elements, so remove() clears them along with the frog.
   Frogbot.onRemove(() => {
     cancelled = true;
+    window.__frogbotRunning = false;
     document.removeEventListener("keydown", onKeyDown, true);
     Highlight.clearAll();
+    Card.hide();
   });
 
   run(targets).catch((error) => {
+    if (!cancelled) window.__frogbotRunning = false;
     // Removing the frog mid-animation rejects with AbortError; that's expected.
     if (!cancelled && error.name !== "AbortError") console.error("Frogbot:", error);
   });

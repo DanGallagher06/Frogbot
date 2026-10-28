@@ -273,6 +273,8 @@
     check("vsEstimate", got.vsEstimate);
     check("tolerance", got.tolerance ? got.tolerance.display : null);
     check("changeDirection", got.change ? got.change.direction : null);
+    check("priorPeriod", got.priorPeriod);
+    check("prior", got.prior ? `${got.prior.display} in ${got.prior.period}` : null);
     check("qualifiers", got.qualifiers);
     check("change", got.change ? got.change.display : null);
     check("linked", Boolean(got.linkedTo));

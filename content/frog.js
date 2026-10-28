@@ -1,6 +1,7 @@
 // Frogbot: the frog sprite, its movement and its tongue.
 // Injected before main.js. Defines a single global, window.Frogbot.
-// All positions are document coordinates (viewport rect + scroll offsets).
+// All positions are document coordinates (viewport rect + scroll offsets), except after
+// hopToFixed(), when the frog is position: fixed and positions are viewport coordinates.
 (() => {
   // Re-injection (clicking the button again) must not redefine the global.
   if (window.Frogbot) return;
@@ -81,7 +82,7 @@
   // Bumped on every show() and remove(), so work started for an old frog stops.
   let generation = 0;
   // Frog centre and rotation. Rotation 0 means facing down the page.
-  const state = { x: 0, y: 0, angle: 0 };
+  const state = { x: 0, y: 0, angle: 0, fixed: false };
 
   const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const duration = (ms) => (reducedMotion() ? 1 : ms);
@@ -188,6 +189,33 @@
     };
   }
 
+  // The hop itself: a leap to `spot` with the legs stretched.
+  async function jump(spot, gen) {
+    const from = translateFor(state.x, state.y);
+    const mid = translateFor((state.x + spot.x) / 2, (state.y + spot.y) / 2);
+    const to = translateFor(spot.x, spot.y);
+    const keyframes = reducedMotion()
+      ? [{ translate: from }, { translate: to }]
+      : [
+          { translate: from, scale: 1 },
+          { translate: mid, scale: 1.25 },
+          { translate: to, scale: 1 },
+        ];
+
+    const frog = frogEl;
+    state.x = spot.x;
+    state.y = spot.y;
+    frog.style.translate = to;
+    // Swaps the legs from "tucked" to "stretched" (see frogbot.css).
+    frog.classList.add("frogbot-hopping");
+    try {
+      await animate(frog, keyframes, { duration: duration(HOP_MS), easing: "ease-in-out" });
+    } finally {
+      frog.classList.remove("frogbot-hopping");
+    }
+    checkAlive(gen);
+  }
+
   window.Frogbot = {
     isShowing() {
       return Boolean(frogEl && frogEl.isConnected);
@@ -205,6 +233,7 @@
       state.x = at ? at.x : window.scrollX + document.documentElement.clientWidth / 2;
       state.y = at ? Math.max(at.y, FROG_SIZE / 2) : TOP_MARGIN + FROG_SIZE / 2;
       state.angle = 0;
+      state.fixed = false;
       frogEl.style.translate = translateFor(state.x, state.y);
       frogEl.style.rotate = "0deg";
 
@@ -282,33 +311,37 @@
       const spot = landingSpotFor(element);
       await this.faceTowards(spot.x, spot.y);
       checkAlive(gen);
-
-      const from = translateFor(state.x, state.y);
-      const mid = translateFor((state.x + spot.x) / 2, (state.y + spot.y) / 2);
-      const to = translateFor(spot.x, spot.y);
-      const keyframes = reducedMotion()
-        ? [{ translate: from }, { translate: to }]
-        : [
-            { translate: from, scale: 1 },
-            { translate: mid, scale: 1.25 },
-            { translate: to, scale: 1 },
-          ];
-
-      const frog = frogEl;
-      state.x = spot.x;
-      state.y = spot.y;
-      frog.style.translate = to;
-      // Swaps the legs from "tucked" to "stretched" (see frogbot.css).
-      frog.classList.add("frogbot-hopping");
-      try {
-        await animate(frog, keyframes, { duration: duration(HOP_MS), easing: "ease-in-out" });
-      } finally {
-        frog.classList.remove("frogbot-hopping");
-      }
-      checkAlive(gen);
+      await jump(spot, gen);
 
       const rect = docRect(element);
       await this.faceTowards(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    },
+
+    // The last hop, to a spot in the window (viewport coordinates). The frog switches to
+    // position: fixed first, so it stays there while the page scrolls.
+    async hopToFixed(spot) {
+      const gen = generation;
+      checkAlive(gen);
+      if (!state.fixed) {
+        state.x -= window.scrollX;
+        state.y -= window.scrollY;
+        state.fixed = true;
+        frogEl.classList.add("frogbot-fixed");
+        frogEl.style.translate = translateFor(state.x, state.y);
+      }
+      await this.faceTowards(spot.x, spot.y);
+      checkAlive(gen);
+      await jump(spot, gen);
+    },
+
+    // Where the frog's mouth is (document coordinates, or viewport ones once fixed).
+    mouthPosition() {
+      return mouthPosition();
+    },
+
+    // The frog artwork, for the stat card's header.
+    svg() {
+      return FROG_SVG;
     },
 
     // Flick the tongue to the element's nearest edge; onHit runs at full extension.

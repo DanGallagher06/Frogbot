@@ -84,6 +84,15 @@
   const NEGATION = /^(?:not|no|never|without|failed|fail|fails|longer|cannot)$|n['’]t$/i;
   // The earlier value in a comparison: "up 14.2% from $422.6 million".
   const PRIOR_BEFORE = /\b(?:from|compared (?:with|to)|versus|vs\.?|against)\s+(?:about\s+|approximately\s+|roughly\s+|around\s+)?$/i;
+  // A table cell showing a fall: "(3)%", "($1.2)", "(2.7) pts", "(62" (some tables put the
+  // closing bracket in the next cell), "-3%", "−0.4". Not a footnote marker like "(1)".
+  const NEGATIVE_CELL =
+    /^(?:\(\s*[$€£¥]?\s?(?:\d[\d,]*\.\d+|\d{2,}[\d,]*|\d+(?=\s*\)?\s*(?:%|pts?|bps)))\s*\)?\s*(?:%|pts?|bps)?|[-−]\s?[$€£¥]?\d[\d,.]*\s*(?:%|pts?|bps)?)$/;
+  // A share of a group, not a metric: "83% of S&P 500 companies", "78% of companies",
+  // "24% having released results". And "the five-year average of 78%" beside one of those.
+  const SHARE_AFTER =
+    /^\s*(?:of\s+(?:[\w&.-]+\s+){0,3}?(?:companies|firms|stocks|members|constituents|respondents|analysts|investors|businesses|households|people|issuers|them|those|these)\b|(?:having|have|has|had)\s+(?:already\s+)?(?:reported|released|beaten|beat|missed|topped|exceeded|posted))/i;
+  const AVERAGE_BEFORE = /\baverage(?:\s+of)?\s+$/i;
   const TOLERANCE_BEFORE = /(?:plus or minus|\+\/-|\+\/−|±)\s*$/i;
   const ESTIMATE_NOUN = String.raw`(?:consensus|estimates?|expectations?|forecasts?|analysts?|the Street|Wall Street)`;
   const ABOVE_ESTIMATE = new RegExp(String.raw`\b(?:beat|beats|beating)\b|\b(?:above|ahead of|topped|exceeded|surpassed)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
@@ -304,11 +313,14 @@
       confidence: "low",
       periodInferred: false,
       showOnCard: false,
+      score: unit.finalScore ?? unit.score ?? null,
       direction: null,
       directionSource: null,
       sentiment: null,
       vsEstimate: null,
       tolerance: null,
+      priorPeriod: false,
+      prior: null,
       kind: unit.kind,
       signed: /^\+/.test(n.raw),
       _unit: unit,
@@ -323,6 +335,7 @@
     const isGuidance = Score.topicOf(text) === "guidance/outlook/forecast";
     const facts = [];
     const tolerances = [];
+    const shares = new Set(groups.map((g) => g.figure).filter((n) => n.type === "percent" && SHARE_AFTER.test(text.slice(n.end))));
 
     groups.forEach((group, gi) => {
       const n = group.figure;
@@ -344,12 +357,14 @@
 
       // Label: the nearest finance term before the figure in its clause, else in an earlier
       // clause of the sentence (medium), else a guidance metric, else a snippet (low).
+      // A share of a group of companies takes no metric label from the words around it.
+      const isShare = shares.has(n) || (shares.size > 0 && n.type === "percent" && AVERAGE_BEFORE.test(before));
       let labelSource = "term";
-      let term = termBefore(text, cs, n.start);
+      let term = isShare ? null : termBefore(text, cs, n.start);
       if (!term) {
         // A clause about the stock doesn't borrow an earlier clause's metric ("revenue
         // forecast fell short, yet the stock rose 5%").
-        term = /\b(?:stock|shares|share price)\b/i.test(before) ? null : termBefore(text, 0, cs);
+        term = isShare || /\b(?:stock|shares|share price)\b/i.test(before) ? null : termBefore(text, 0, cs);
         labelSource = term ? "sentence" : "fallback";
       }
       let qualifiers = term ? qualifiersBefore(text, term.start >= cs ? cs : 0, term.start) : [];
@@ -386,9 +401,11 @@
         f.label = labelFrom(qualifiers, base);
         f.topic = TOPIC_OF_LABEL[base] || "other";
       } else {
+        // A share reads best from the words after it ("of S&P 500 companies are").
         const words = collapse(before).split(" ").filter((w) => /\w/.test(w)).slice(-5);
-        const snippet = words.length >= 2 ? words.join(" ") : collapse(after).split(" ").slice(0, 5).join(" ");
-        f.label = snippet.replace(/[,(]+$/, "") || n.raw;
+        const following = collapse(after).split(" ").filter((w) => /\w/.test(w)).slice(0, 5).join(" ");
+        const snippet = (!isShare || !following) && words.length >= 2 ? words.join(" ") : following;
+        f.label = snippet.replace(/[,(.;:]+$/, "") || n.raw;
         f.topic = "other";
       }
       if (f.role === "guidance") f.label = `Guidance: ${f.label}`;
@@ -427,9 +444,17 @@
       f._prior = f.role === "level" && PRIOR_BEFORE.test(near);
       if (!f._prior) {
         const words = directionFromWords(near, nearAfter);
+        // "$5.2 billion, up from $4.8 billion": the words give the direction, and the two
+        // values must agree with them.
+        const upDownFrom = nearAfter.match(/^\s*,?\s*(up|down)\s+from\s+(?:about\s+|approximately\s+|roughly\s+|around\s+)?$/i);
+        const fromFigure = upDownFrom && groups[groups.indexOf(group) + 1] && groups[groups.indexOf(group) + 1].figure;
         if (f.role === "change" && /^[+]/.test(n.raw)) setDirection(f, "up", "sign");
         else if (f.role === "change" && /^[-−]/.test(n.raw)) setDirection(f, "down", "sign");
-        else if (words.blocked) f._dirBlocked = true;
+        else if (fromFigure) {
+          const said = upDownFrom[1].toLowerCase();
+          if (!comparable(n, fromFigure) || compare(n.value, fromFigure.value) === said) setDirection(f, said, "fromTo");
+          else f._dirBlocked = true;
+        } else if (words.blocked) f._dirBlocked = true;
         else if (words.direction) setDirection(f, words.direction, "verb");
         else {
           const other = fromToPartner(text, groups, group, cs, ce);
@@ -613,7 +638,18 @@
       else if (c.value < 0 || /^[-−(]/.test(c.raw)) setDirection(c, "down", "changeColumn");
       else if (c.value === 0) setDirection(c, "flat", "changeColumn");
     }
-    tableColumnDirection(facts);
+    const columns = tableColumnDirection(facts);
+    // An unsigned change ("31%" under "Q/Q") counts as up only when the page shows its falls
+    // with brackets or minus signs, and the period columns it compares agree.
+    if (columns && ctx.negativesShown) {
+      for (const c of facts) {
+        if (c.role !== "change" || c.direction || c.value <= 0) continue;
+        const cell = cells.find((x) => c._n.start >= x.start && c._n.start < x.end);
+        const header = cell && cell.header ? cell.header : "";
+        const prior = /q\/q|qoq|sequential|quarter/i.test(header) ? columns.sequential : /y\/y|yoy|year/i.test(header) ? columns.yearAgo : columns.prior;
+        if (prior && columns.current.value > prior.value) setDirection(c, "up", "changeColumn");
+      }
+    }
 
     // Row changes ("+14.2%" under "Change") link to the row's first level (the current period).
     const firstLevel = facts.find((x) => x.role === "level");
@@ -630,14 +666,22 @@
       .filter((f) => f.role === "level" && f.periodSource === "table")
       .map((f) => ({ f, p: columnPeriod(f.period.text) }))
       .filter((x) => x.p);
-    if (levels.length < 2) return;
+    if (levels.length < 2) return null;
     const current = levels.reduce((a, b) => (b.p.key > a.p.key ? b : a));
-    if (levels.filter((x) => x.p.key === current.p.key).length > 1) return;
+    if (levels.filter((x) => x.p.key === current.p.key).length > 1) return null;
     const same = levels.filter((x) => x !== current && x.p.shape === current.p.shape && x.p.key < current.p.key);
-    if (!same.length) return;
-    const prior = same.find((x) => x.p.key === current.p.key - 4) || same.reduce((a, b) => (b.p.key > a.p.key ? b : a));
-    if (!comparable(current.f, prior.f)) return;
+    if (!same.length) return null;
+    const yearAgo = same.find((x) => x.p.key === current.p.key - 4);
+    const sequential = same.reduce((a, b) => (b.p.key > a.p.key ? b : a));
+    const prior = yearAgo || sequential;
+    // The earlier columns are comparisons: they stay off the card, and the current figure
+    // carries the one it's compared with ("vs $422.6M in Q3 2025").
+    for (const x of same) x.f.priorPeriod = true;
+    current.f._priorOf = prior.f;
+    if (!comparable(current.f, prior.f)) return null;
     setDirection(current.f, compare(current.f.value, prior.f.value), "tableColumns");
+    const usable = (x) => (x && comparable(current.f, x.f) ? x.f : null);
+    return { current: current.f, prior: prior.f, yearAgo: usable(yearAgo), sequential: usable(sequential) };
   }
 
   const ORDINAL_QUARTER = { first: 1, second: 2, third: 3, fourth: 4 };
@@ -680,10 +724,13 @@
     return "high";
   }
 
-  // Every change records its level; the level keeps the first change it was given.
+  // Every change records its level. The level shows the first change it was given, or the
+  // first percentage if that came later ("$68.1 billion, exceeding guidance by $3 billion, up
+  // 20%" shows 20%).
   function link(level, change) {
     if (change._linkedTo) return;
-    if (!level._changeOf) level._changeOf = change;
+    const percent = (c) => c.type === "percent" || c.type === "basisPoints";
+    if (!level._changeOf || (percent(change) && !percent(level._changeOf))) level._changeOf = change;
     change._linkedTo = level;
   }
 
@@ -744,7 +791,13 @@
   function buildFacts(targets, blocks, context = {}) {
     const units = targets.flatMap((t) => t.units || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const pagePeriod = context.pagePeriod !== undefined ? context.pagePeriod : dominantPeriod(units);
-    const ctx = { pagePeriod };
+    // Does the page write falls as "(3)%" or "-3%" in its tables? Then an unsigned change is a rise.
+    const negativesShown =
+      context.negativesShown !== undefined
+        ? context.negativesShown
+        : (blocks || []).some((b) => b.type === "table" && NEGATIVE_CELL.test(collapse(b.text))) ||
+          units.some((u) => (u.cells || []).some((c) => NEGATIVE_CELL.test(collapse(c.text))));
+    const ctx = { pagePeriod, negativesShown };
     const all = units.flatMap((unit) => factsFromUnit(unit, ctx));
 
     for (const f of all) {
@@ -821,7 +874,9 @@
     // card's "Also caught" section.
     for (const f of kept) {
       const roleOk = f.role === "level" || f.role === "guidance" || (f.role === "change" && !f.linkedTo);
-      f.showOnCard = f.labelConfidence !== "low" && roleOk;
+      f.showOnCard = f.labelConfidence !== "low" && roleOk && !f.priorPeriod;
+      const prior = resolve(f._priorOf);
+      if (prior && prior.period) f.prior = { display: prior.display, period: prior.period.text };
     }
     const internal = new Set(["kind", "perShare", "signed"]);
     return kept.map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_") && !internal.has(k))));

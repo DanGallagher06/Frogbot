@@ -15,10 +15,12 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
-    "label": "So far",
+    "label": "of S&P 500 companies have",
     "display": "29%",
     "role": "level",
     "period": "third-quarter",
@@ -33,6 +35,8 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -51,24 +55,28 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
-    "label": "EPS",
+    "label": "above the five-year average of",
     "display": "78%",
     "role": "level",
     "period": "third-quarter",
     "periodSource": "sentence",
-    "labelConfidence": "high",
+    "labelConfidence": "low",
     "periodConfidence": "medium",
-    "confidence": "medium",
-    "showOnCard": true,
+    "confidence": "low",
+    "showOnCard": false,
     "periodInferred": false,
     "direction": null,
     "directionSource": null,
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -87,6 +95,8 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -105,6 +115,8 @@
     "sentiment": "good",
     "vsEstimate": "above",
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -123,6 +135,8 @@
     "sentiment": "good",
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -141,6 +155,8 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   },
   {
@@ -159,6 +175,8 @@
     "sentiment": null,
     "vsEstimate": null,
     "tolerance": null,
+    "priorPeriod": false,
+    "prior": null,
     "sources": 1
   }
 ]

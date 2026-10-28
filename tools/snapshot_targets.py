@@ -69,6 +69,8 @@ RUNNER = """
         sentiment: f.sentiment,
         vsEstimate: f.vsEstimate,
         tolerance: f.tolerance ? f.tolerance.display : null,
+        priorPeriod: f.priorPeriod,
+        prior: f.prior ? `${f.prior.display} in ${f.prior.period}` : null,
         sources: f.sources.length,
       })),
     });

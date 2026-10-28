@@ -22,8 +22,10 @@ After you change any file, click the reload icon on Frogbot's card in `chrome://
 3. Click the Frogbot icon, then **Release the frog**.
 4. The frog appears just above the article (`Frogbot here` is logged in the page's DevTools
    console), then hops down the page to the sentences and table rows with the most important
-   numbers, flicking its tongue at each key figure to highlight it. Press **Escape** at any
-   point to remove the frog and all highlights; the page is restored exactly.
+   numbers, flicking its tongue at each key figure to highlight it. After the last target it
+   hops to the bottom-right corner and drops the stat card (see "The stat card" below).
+   Press **Escape** at any point, or the card's **×**, to remove the frog, the card and all
+   highlights; the page is restored exactly.
 
 ### What the highlights mean
 
@@ -86,6 +88,7 @@ content/score.js     window.FrogbotScore: sentence splitting, number detection, 
                      and target picking (pure functions, no page access)
 content/highlight.js window.FrogbotHighlight: exact figure marks, whole-block fallback, clearAll()
 content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
+content/card.js      window.FrogbotCard: the stat card, rendered in a shadow root
 assets/frog.svg      Reference copy of the frog artwork
 test-pages/          Local pages for testing
 tests/               Detection, scoring, facts and held-out test cases, the browser test
@@ -162,7 +165,8 @@ Each record has the figure (`value`, or `low`/`high` for a range, `type`, `curre
 `scale`, and a short `display` like "$482.6M" or "$505M–$525M"), plus:
 
 - **label**: the table row header, or the nearest finance term before the figure in the
-  same clause ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached:
+  same clause (except for a percentage that's a share of a group, "83% of S&P 500
+  companies", "24% having released results", which gets a snippet label) ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached:
   GAAP / non-GAAP, adjusted, diluted, organic, a segment name ("Gaming revenue"), or a table
   title. Guidance figures get "Guidance: <metric>". When no term is found, the label is a
   short snippet of the text before the figure.
@@ -185,7 +189,11 @@ Each record has the figure (`value`, or `low`/`high` for a range, `type`, `curre
 - **confidence**: the lower of the two (a missing period doesn't lower it), kept for the
   debug table.
 - **showOnCard**: true when the label is `high` or `medium` and the fact is a level, guidance,
-  or a change with no level to link to. Linked changes show beside their level; snippet-labelled
+  or a change with no level to link to, and it isn't an earlier table column.
+- **priorPeriod** and **prior**: in a row with comparable period columns ("Q3 2026" and
+  "Q3 2025"), the earlier columns are `priorPeriod` (off the card, not in "Also caught"), and
+  the current figure's `prior` is the one it's compared with: `{ display, period }` (the same
+  period a year earlier, else the latest before it). Linked changes show beside their level; snippet-labelled
   facts are left for the card's "Also caught" section.
 - **sources**: every place the figure was caught. The same figure with the same label,
   period and qualifiers is merged into one record (money within 0.5%, percentages exactly),
@@ -194,13 +202,16 @@ Each record has the figure (`value`, or `low`/`high` for a range, `type`, `curre
 - **direction** (`up`, `down`, `flat` or null) and **directionSource**, for the card's arrows.
   If the page doesn't make the direction plain, it is null; it is never guessed. In order:
   - `changeColumn`: a signed or bracketed value in a table change column ("+8%", "(3)%",
-    "-3%", "0%"). An unsigned value ("56%" under "Y/Y") doesn't say which way.
+    "-3%", "0%"). An unsigned value ("56%" under "Y/Y") counts as up only when the page
+    writes its falls with brackets or minus signs in its tables, and the period columns the
+    change compares (the previous quarter for "Q/Q", a year earlier for "Y/Y") agree.
   - `sign`: a signed change figure in prose ("+12.5%").
   - `verb`: a change word near the figure in its clause: before it (not past the previous
     figure) or right after it ("rose", "fell", "up", "lower", "unchanged", "a record $4.3
     billion"). A negation within three words ("did not rise", "failed to grow") or a word
     whose meaning depends on its subject ("the loss narrowed", "growth slowed") gives null.
-  - `fromTo`: "from $X to $Y" or "$Y, from $X": the two values compared.
+  - `fromTo`: "from $X to $Y" or "$Y, from $X": the two values compared. "$Y, up from $X"
+    and "$Y, down from $X" take the direction from the words, if the values agree with them.
   - `tableColumns`: a row with current and prior period columns whose headers match apart
     from their dates ("Q3 2026" / "Q3 2025"); the current figure is compared with the same
     period a year earlier, else the latest before it. Direction only, no % is computed.
@@ -220,6 +231,38 @@ Each record has the figure (`value`, or `low`/`high` for a range, `type`, `curre
 
 Money displays keep the page's decimal places when the unit matches ("$54.0 billion" shows
 as "$54.0B", "$84.0" in a table "in millions" as "$84.0M").
+
+## The stat card
+
+At the end of a run, if anything was caught, the frog hops to the bottom-right corner of the
+window, perches on the card's top-left corner and drops the card from its mouth (with reduced
+motion, both just appear). The frog and card are fixed to the window, so they stay put while
+the page scrolls; highlights stay on the page.
+
+- **Rows**: facts with `showOnCard`, one main row per metric (label with its qualifiers, plus
+  role; each guidance metric counts separately). A metric's main row is its most recent
+  period, then the higher label and period confidence, then the higher score; its other rows
+  only appear under "Show all". Metrics go by importance: revenue, gross profit, operating
+  income, net income, EPS, margins and cash flow, then guidance, then segment figures ("Data
+  Center revenue"), then everything else; within that, levels come before standalone changes.
+  A standalone change with a level for the same label and period only appears under "Show
+  all". The top 7 show, with "Show all (N)" for the rest.
+- **Columns**: Metric (guidance reads "Guidance · Revenue"), Figure (with a dot in its
+  highlight colour), Change (an arrow, ▲ up, ▼ down, ▬ flat, plus the linked change; green
+  good, red bad, grey otherwise; empty without a direction; a tooltip gives the earlier
+  column it's compared with, "vs $176.2M in Q3 2025") and Period (lighter and italic, with a
+  tooltip, when inferred from the page).
+- **Also caught (N)**: a collapsed list of the other facts (apart from changes shown beside
+  their level), snippet labels in quotes.
+- With no headline figures, the card says "No headline figures here" and keeps "Also caught".
+  With no facts at all, there is no card (the frog says "Nothing to catch here" when there are
+  no targets).
+- The card is a `role="dialog"`; its buttons are reachable with Tab. Only the card itself takes
+  clicks. It follows the browser's dark mode, and becomes a full-width bottom sheet in windows
+  narrower than 480px.
+- It lives in a shadow root on a zero-size host element with inline `!important` styles, so the
+  site's CSS can't change it and its CSS can't reach the page.
+- Releasing the frog again after a run replaces the card; releasing it mid-run does nothing.
 
 ## Measuring accuracy honestly
 
@@ -250,6 +293,9 @@ the runner skips them, so it reports "No held-out cases yet" until real ones are
 
 ## Known issues
 
+- **Timing checks vary with machine load.** The browser checks time scoring on the Nvidia
+  release against 50ms; it usually takes about 30ms, but runs well above that when the machine
+  is busy (other browsers open, for example).
 - **Pages that scroll inside a box.** Some sites (currently BBC) scroll the article inside
   an inner container instead of scrolling the page itself, sometimes switching to that only
   after the frog appears. The frog is positioned on the page, so its scroll-in check can fail
@@ -311,6 +357,9 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
   - Step 11: change direction (from signs, change words, from/to, change columns and period
     columns), sentiment for known metrics, beat/miss against estimates, and guidance
     tolerances (no UI yet)
+  - Step 12: the stat card, delivered by the frog at the end of a run: importance-ordered rows
+    with arrows and sentiment colours, "Show all", "Also caught", dark mode and a bottom
+    sheet on narrow windows
 - **Milestone 3: AI summary (not started).** A short summary written only from the chosen
   sentences, with a check that every number in the summary appears on the page. On-device AI
   where the browser has it, and a rules-only fallback otherwise.

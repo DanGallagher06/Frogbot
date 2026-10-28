@@ -55,6 +55,11 @@
   pointer-events: none !important;
 }
 
+/* The last hop, to the stat card: fixed to the window so it stays put while scrolling. */
+.frogbot-frog.frogbot-fixed {
+  position: fixed !important;
+}
+
 /* Legs: "tucked" by default, "stretched" while hopping. Each leg scales out from its hip. */
 .frogbot-frog .frogbot-leg {
   transform-box: fill-box;
