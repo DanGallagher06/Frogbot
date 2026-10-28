@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- The 16px icon: the same face simplified to solid eyes and a thicker smile, so it stays
+       readable in the toolbar. Rendered to assets/icon-16.png by tools/build_icons.py. -->
+  <rect x="0" y="0" width="16" height="16" rx="3.5" fill="#2e9d4f"/>
+  <circle cx="5" cy="5.8" r="2" fill="#ffffff"/>
+  <circle cx="11" cy="5.8" r="2" fill="#ffffff"/>
+  <path d="M3.8 9.6Q8 13.6 12.2 9.6" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round"/>
+</svg>

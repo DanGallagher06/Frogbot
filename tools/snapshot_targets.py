@@ -157,7 +157,7 @@ def main() -> None:
             snapshot = SNAPSHOTS / f"{page.stem}{suffix}.json"
             if not snapshot.exists() or update:
                 existed = snapshot.exists()
-                snapshot.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                snapshot.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
                 print(f"{page.name}: {'updated' if existed else 'created'} {kind} snapshot ({len(data)} {kind})")
                 continue
             old = json.loads(snapshot.read_text(encoding="utf-8"))

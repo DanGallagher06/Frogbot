@@ -259,13 +259,26 @@
     // ---- Real sentences: Apple Q4 FY25 release ----
     {
       source: "apple",
-      text: "CUPERTINO, CALIFORNIA Apple today announced financial results for its fiscal 2025 fourth quarter ended September 27, 2025. The Company posted quarterly revenue of $102.5 billion, up 8 percent year over year. Diluted earnings per share was $1.85, up 13 percent year over year on an adjusted basis.1",
-      expected: [period("fiscal 2025"), period("fourth quarter"), date("September 27, 2025"), money("$102.5 billion", 102500000000), pct("8 percent", 8), period("year over year"), eps("$1.85", 1.85), pct("13 percent", 13), period("year over year"), junk("1", "footnote")],
+      text: "CUPERTINO, CALIFORNIA Apple today announced financial results for its fiscal 2025 fourth quarter ended September 27, 2025.",
+      expected: [period("fiscal 2025"), period("fourth quarter"), date("September 27, 2025")],
+    },
+    // The same patterns as the rest of that release, in our own words: "percent" spelled out,
+    // "year over year", EPS named before the figure, and a footnote stuck to the full stop.
+    { source: "synthetic", text: "Quarterly revenue was $9.4 billion, up 8 percent year over year.", expected: [money("$9.4 billion", 9400000000), pct("8 percent", 8), period("year over year")] },
+    {
+      source: "synthetic",
+      text: "Diluted earnings per share was $2.15, up 13 percent year over year on an adjusted basis.1",
+      expected: [eps("$2.15", 2.15), pct("13 percent", 13), period("year over year"), junk("1", "footnote")],
     },
     {
       source: "apple",
-      text: "Apple’s board of directors has declared a cash dividend of $0.26 per share of the Company’s common stock. The dividend is payable on November 13, 2025 to shareholders of record as of the close of business on November 10, 2025.",
-      expected: [eps("$0.26 per share", 0.26), date("November 13, 2025"), date("November 10, 2025")],
+      text: "Apple’s board of directors has declared a cash dividend of $0.26 per share of the Company’s common stock.",
+      expected: [eps("$0.26 per share", 0.26)],
+    },
+    {
+      source: "synthetic",
+      text: "The dividend is payable on May 14, 2026 to shareholders of record as of the close of business on May 11, 2026.",
+      expected: [date("May 14, 2026"), date("May 11, 2026")],
     },
     {
       source: "apple",

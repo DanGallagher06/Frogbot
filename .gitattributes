@@ -1,0 +1,11 @@
+# Text files are stored and checked out with LF line endings on every platform.
+* text=auto eol=lf
+
+# Binary files: never touch their line endings.
+*.png binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary

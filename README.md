@@ -1,304 +1,232 @@
 # Frogbot
 
-Frogbot is a Chrome extension with a small top-down frog. It hops down a finance article and
-catches the important numbers with its tongue (revenue, EPS, margins, guidance), highlighting
-each figure exactly where it appears.
-It runs only when you click it, has no background script, and uses only the `activeTab`,
-`scripting` and `storage` permissions (`storage` just remembers the debug-view setting).
+A frog that hops through financial articles and catches the numbers that matter.
 
-## Load it unpacked
+![Frogbot hopping down a sample earnings release, highlighting figures, then dropping its summary card](docs/demo.gif)
+
+## What it does
+
+- **Finds the key figures** in a finance article or earnings release (revenue, profit, EPS,
+  margins, guidance) by scoring every sentence and table row on the page.
+- **Highlights each figure exactly where it appears**, colour-coded by type, as the frog hops
+  down the page and flicks its tongue at it.
+- **Delivers a summary card** with the figures it caught, their periods and change arrows
+  (green when the move is good for that metric, red when it's bad).
+- **Jumps back to the source**: click any row on the card to scroll to that figure on the page.
+  Copy the table into a spreadsheet, or download it as CSV.
+
+![A paragraph with its revenue figure highlighted in gold and its growth rate in blue](docs/highlights.png)
+
+| The card in light mode | The card in dark mode |
+| --- | --- |
+| ![The summary card in light mode](docs/card-light.png) | ![The summary card in dark mode](docs/card-dark.png) |
+
+## Why not just paste the article into an AI chat?
+
+Every figure on the card comes straight from the page, and you can see exactly where: each
+one is highlighted in the article, and clicking its row takes you back to it. Nothing is
+generated or paraphrased, so nothing can be made up; figures are shown as written or in a short
+form ("$482.6 million" as "$482.6M"), and the CSV export keeps the source sentence. When Frogbot
+isn't sure what a figure is (its label, its period, or which way it moved), it says so rather
+than guessing: an unclear label goes under "Also caught", an inferred period is shown in
+lighter italics, and an unclear direction gets no arrow.
+
+## Privacy
+
+Frogbot runs entirely in your browser, and only on the tab where you click it. It has no
+background script, makes no network requests, and sends no data anywhere. Downloaded CSV files
+are saved straight to your computer.
+
+It asks for three permissions:
+
+| Permission | Why |
+| --- | --- |
+| `activeTab` | Access to the current tab only, and only after you click the extension. |
+| `scripting` | To add the frog, the highlights and the card to that tab. |
+| `storage` | To remember one setting locally: whether the debug view is on. |
+
+## Install
+
+Frogbot isn't in an extension store yet; load it from this folder.
+
+**Chrome**
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and select this `frogbot` folder.
-4. Optional: pin Frogbot from the puzzle-piece menu so the icon is always visible.
+4. Optional: pin Frogbot from the puzzle-piece menu so its icon is always visible.
 
-After you change any file, click the reload icon on Frogbot's card in `chrome://extensions`.
+**Edge**
 
-## Test on the local sample page
+1. Open `edge://extensions`.
+2. Turn on **Developer mode** (in the left-hand panel).
+3. Click **Load unpacked** and select this `frogbot` folder.
+4. Optional: pin Frogbot from the extensions (puzzle-piece) menu.
 
-1. On Frogbot's **Details** page in `chrome://extensions`, turn on **Allow access to file URLs**.
-2. Open `test-pages/earnings-sample.html` in Chrome (drag it into a tab).
-3. Click the Frogbot icon, then **Release the frog**.
-4. The frog appears just above the article (`Frogbot here` is logged in the page's DevTools
-   console), then hops down the page to the sentences and table rows with the most important
-   numbers, flicking its tongue at each key figure to highlight it. After the last target it
-   hops to the bottom-right corner and drops the stat card (see "The stat card" below).
-   Press **Escape** at any point, or the card's **×**, to remove the frog, the card and all
-   highlights; the page is restored exactly.
+Then open a finance article, click the Frogbot icon and press **Release the frog**. Press
+**Escape**, or the card's **×**, to remove the frog, the card and every highlight; the page is
+restored exactly as it was.
 
-### What the highlights mean
+To try it on the included sample page, turn on **Allow access to file URLs** on Frogbot's
+details page, then open `test-pages/earnings-sample.html` (a fictional company's earnings
+release) in a tab.
 
-At each target the tongue flicks at the first key figure, then makes up to two quicker flicks
-at the next ones (any further figures light up with the last flick). Each figure is highlighted
-in place, coloured by type:
+## How it works
 
-- **Gold:** money and per-share figures ($12.4B, $1.42 per share)
-- **Blue:** percentages and basis points (14.2%, 180 bps)
-- **Purple:** a period or date attached to a figure (the "Q3 2026" in "$12.4B in Q3 2026")
-- **Grey:** multiples (2.5x)
+Everything runs in the page when you click the button, in six stages:
 
-If a figure can't be matched to the page's text, the whole sentence's block (or the table row)
-is highlighted instead, and the debug view logs why.
+1. **Extract** (`content/extract.js`). Finds the article's main content and splits it into
+   paragraph, list, table, heading and quote blocks, skipping navigation, captions, related
+   links, collapsed and hidden content. Each sentence and each table row becomes a unit to score.
+2. **Detect** (`content/score.js`). Finds every number in a unit and works out what it is:
+   money, percentage, basis points, per-share amount, multiple, period, date, year or count,
+   with its value, currency and scale. Junk such as phone numbers, addresses, footnote markers
+   and copyright years is flagged and ignored.
+3. **Score** (`content/score.js`). Gives each unit points for money and percentages, change
+   words near a number, finance terms, periods and comparisons, and takes points off for
+   junk-only units, very long ones and old figures.
+4. **Pick** (`content/score.js`). Chooses about one target per 100 words of article (3 to 12),
+   never the same figure twice and spread across topics, then orders them down the page so the
+   frog only hops downward.
+5. **Facts** (`content/facts.js`). Turns each caught figure into a record: a label ("Gross
+   profit", "Non-GAAP diluted EPS", "Guidance: Revenue"), a period, whether it's a level, a
+   change, guidance or an estimate, which way it moved, and how confident each of those is.
+   Repeats of the same figure are merged.
+6. **Card** (`content/card.js`). The frog hops to the corner and drops the card: one row per
+   metric in order of importance, with the top 7 shown and the rest behind "Show all".
+   Figures with a guessed label go under "Also caught". The card lives in a shadow root, so the
+   site's styles can't change it.
 
-`test-pages/mapping.html` holds tricky markup for exact highlighting: figures split across
-`<b>`, `<a>` and `<span>`, `&nbsp;`, Wikipedia-style `[1]` markers, line breaks and table
-cells. Each case lists what should be highlighted in `data-expect-figures`.
+### Colour key
 
-Add `?frogbot-fixed` to the test page's URL to make the frog hop to the four hand-placed
-`data-frogbot-target` elements instead of scored targets (useful for checking the animation).
+| Colour | Meaning | Example |
+| --- | --- | --- |
+| Gold | Money and per-share figures | $482.6 million, $1.27 per share |
+| Blue | Percentages and basis points | 14.2%, 180 bps |
+| Purple | A period or date attached to a figure | the "Q3 2026" in "$12.4B in Q3 2026" |
+| Grey | Multiples | 2.5x |
 
-### Debug view: "Show what Frogbot reads"
+On the card, ▲ means up, ▼ down and ▬ flat; green is good for that metric (revenue up,
+costs down), red is bad, and grey is neutral or unknown.
 
-Tick **Show what Frogbot reads** in the popup before releasing the frog (the setting is
-remembered). Frogbot then outlines everything it extracted from the page:
+## Accuracy and testing
 
-- the chosen main content container in solid red
-- every text block in a dashed outline coloured by type, with a small `index type · score`
-  label (the best score of the block's sentences or table row): paragraph grey, list green,
-  table blue, heading purple, quote orange
-- the chosen targets with a solid outline instead of a dashed one
+The number detection, scoring and fact-record code is plain JavaScript with no page access,
+so it's tested on its own against hand-written cases:
 
-It also logs a `console.table` of the blocks (index, type, first 60 characters, length) and the
-extraction time to the page's DevTools console, followed by a table of the numbers found on
-the page by type (plus how many were junk, like phone numbers and footnote markers) and how
-long detection took, then a table of every scored sentence and table row (score, whether it
-was chosen, and the reasons) and how long scoring took. Escape clears the outlines with the frog.
+| Suite | File | Cases |
+| --- | --- | --- |
+| Number detection and sentence splitting | `tests/detect-cases.js` | 212 |
+| Scoring and target picking | `tests/score-cases.js` | 87 |
+| Fact records (labels, periods, direction) | `tests/facts-cases.js` | 136 |
+| Held-out set | `tests/holdout-cases.js` | none yet |
 
-The sample page is a fictional earnings release for "Lilypad Holdings". It contains real-looking
-financial figures plus junk numbers (phone numbers, a street address, a page number, footnote
-markers, a copyright year) for the scorer to ignore.
+All development cases currently pass. `tools/snapshot_targets.py` also checks that the targets
+and fact records picked on each test page only change when intended.
 
-`test-pages/captions-and-collapsed.html` is a news-style article for checking what extraction
-skips: photo captions and credits without `<figcaption>`, a key-points box, a collapsed AI
-summary, a closed `<details>` and a squashed hidden box. Each block is marked
-`data-expect="keep"` or `"skip"`; tick **Show what Frogbot reads** to compare.
+There are two kinds of test case, reported separately:
 
-## Project layout
+- **Development set**: the cases the code was built and fixed against. Every bug that turns up
+  gets a case here, and the code is changed until it passes, so this set's accuracy is close to
+  100% by construction. It shows that known problems stay fixed, not how well Frogbot does on
+  pages it hasn't seen.
+- **Held-out set**: cases written by hand from pages never used in development, and never used
+  as a reason to change the code. Its accuracy is the honest estimate of how Frogbot does on a
+  new article.
+
+Held-out accuracy: to be measured.
+
+## Known issues
+
+- **Pages that scroll inside a box.** Some sites (currently BBC) scroll the article inside an
+  inner container instead of scrolling the page itself, sometimes switching to that only after
+  the frog appears. The frog is positioned on the page, so it may not scroll into view there,
+  though it still lands next to its targets.
+- **Start position on those pages.** The same layout switch occasionally moves BBC's first
+  paragraph under the frog after it has appeared, so the frog can end up sitting on text.
+- **Cookie banners.** A site's consent overlay can sit above the frog and the card, and take
+  keyboard focus, until it's dismissed.
+
+## Backlog
+
+- Pages that scroll the article inside an inner container: position the frog inside that
+  container, or follow its scrolling.
+- An optional subtle tint on the chosen sentence, so a figure reads in context. Left out for now
+  because it looked cluttered next to the coloured figure highlights.
+- Re-map highlights when a page re-renders its content after the frog has run (marks placed
+  before a re-render are lost, though Escape still cleans up, and the card outlines the
+  figure's block instead).
+- Detect numbers during extraction, so scoring doesn't compute them a second time. Scoring
+  takes about 30ms on a big earnings release, which is acceptable for now. Timings vary with
+  machine load (60-80ms is common on a busy machine), so they're logged for information rather
+  than treated as a pass/fail test; only times above 150ms would point to a real problem.
+- "to" and "from" are loose change words (they match "returned $24.3 billion to
+  shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
+  like "from X to Y" or right after a change verb ("rose to", "fell from").
+- Direction for words whose meaning depends on their subject: a loss that "narrowed" or
+  "widened", a decline that "eased", growth that "slowed" or "accelerated". These give no
+  direction for now.
+- Direction for a change that shares an earlier change word: in "up 20% from the previous
+  quarter and 73% year-over-year", the 73% has no direction of its own yet.
+- Tighten the passive "is expected to" guidance rule to require a company subject. At the
+  moment it can tag industry-wide forecasts as guidance (for example "the tech industry is
+  expected to spend a combined $765bn").
+
+## Roadmap
+
+- **Milestone 1: the frog and its catches (done).** Hopping, the tongue, page extraction,
+  number detection, scoring and target picking, and exact-number highlighting coloured by type.
+- **Milestone 2: the summary card (done).** Fact records with labels, periods, change direction
+  and confidence; the card the frog delivers, with change arrows, "Show all" and "Also caught";
+  click a row to jump back to its figure; Copy table and Download CSV.
+- **Milestone 3: AI summary (not started).** A short summary written only from the chosen
+  sentences, with a check that every number in the summary appears on the page. On-device AI
+  where the browser has it, and a rules-only fallback otherwise.
+
+## Project structure
 
 ```
 manifest.json        MV3 manifest (activeTab, scripting and storage only)
 popup/               The toolbar popup with the "Release the frog" button
-content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show()/remove()
 content/main.js      Entry point injected on click: extracts, picks targets, runs the hops
-content/frogbot.css  Frog styles (all classes prefixed frogbot-)
+content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show()/remove()
 content/extract.js   window.FrogbotExtract: main-content detection, text blocks, scoring
                      units, and mapping text positions back to the page
 content/score.js     window.FrogbotScore: sentence splitting, number detection, scoring
                      and target picking (pure functions, no page access)
-content/highlight.js window.FrogbotHighlight: exact figure marks, whole-block fallback, clearAll()
+content/highlight.js window.FrogbotHighlight: exact figure marks, pulses, whole-block fallback
 content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
-content/card.js      window.FrogbotCard: the stat card, rendered in a shadow root
-assets/frog.svg      Reference copy of the frog artwork
-test-pages/          Local pages for testing
-tests/               Detection, scoring, facts and held-out test cases, the browser test
-                     runner, and snapshots of the targets and facts on each test page
+content/card.js      window.FrogbotCard: the summary card, rendered in a shadow root
+content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
+assets/              The frog artwork and the extension icons (with their SVG sources)
+docs/                The demo GIF and screenshots used in this README
+test-pages/          Local pages written for testing (no copied pages)
+tests/               Test cases, the browser test runner, and snapshots of each test page's
+                     targets and fact records
 tools/               Developer scripts (not part of the extension)
 ```
 
-## Running the tests
-
-`content/score.js` is plain code with no page access, so it is tested on its own against
-the cases in `tests/detect-cases.js`, `tests/score-cases.js` and `tests/holdout-cases.js`
-(number detection, sentence splitting and scoring; see "Measuring accuracy honestly" below).
-`content/facts.js` is tested the same way against `tests/facts-cases.js`.
+### Running the tests
 
 - **In the browser:** open `tests/run-tests.html` straight from the file system in Edge or
-  Chrome. It shows a summary, accuracy for each number type, and a row per case; failed
-  rows show what was expected and what was found. Reload after editing the code or cases.
-The page has four sections: the development detection cases, the scoring cases
-(`tests/score-cases.js`), the facts cases (`tests/facts-cases.js`) and the held-out set.
+  Chrome. It shows a summary, accuracy for each number type, and a row per case; failed rows
+  show what was expected and what was found. Reload after editing the code or cases. The page
+  has four sections: detection, scoring, facts and the held-out set.
+- **From the command line:** `python tools/run_tests.py` runs the same page in headless Edge or
+  Chrome and prints the summary and any failures for each set (exit status 1 if anything
+  fails). Set `FROGBOT_BROWSER` to a browser executable if it isn't found automatically.
+- **Snapshots:** after changing scoring or facts, run `python tools/snapshot_targets.py`. It
+  prints how the picks and their fact records changed on each test page compared with
+  `tests/snapshots/`; run it with `--update` to save them once you're happy.
 
-- **From the command line:** `python tools/run_tests.py` runs the same page in headless
-  Edge or Chrome and prints the summary and any failures for each set (exit status 1 if
-  anything fails).
-  Set `FROGBOT_BROWSER` to a browser executable if it isn't found automatically.
+The tools need Python 3 and nothing else, apart from one optional script:
+`tools/record_demo.py` re-records `docs/demo.gif` and the README screenshots from the test page,
+and needs Selenium and Pillow (`pip install selenium pillow`). It's only needed to update the
+GIF.
 
-To add a case, copy one in `tests/detect-cases.js`: give the text, where it came from, and
-the numbers you expect. Only the fields you list are checked, but every number found must
-be expected.
-
-## How the frog chooses targets
-
-`extract.js` turns the page's blocks into units: each sentence of a paragraph, list item or
-quote, and each table row (its cells joined with " | ", plus the column headers above its
-figures). `score.js` scores every unit with `scoreUnit()` and picks targets with
-`pickTargets()`:
-
-- Points for money, percentages and per-share figures, a change word near a number, finance
-  terms, periods, comparisons and context (bold text, a heading with a number, or a table row
-  without column headers; rows with headers get the period point from them instead), and
-  penalties for units with only counts or years, only junk, or over 60 words, and for old
-  figures: a unit whose newest explicit year is 5-9 years older than the newest year on the
-  page loses 2, and 10 or more years older loses 4 (not when it names a current period such
-  as "Q3", or has no year). Every weight, and the topic list below, is in the `WEIGHTS`
-  object at the top of `score.js`.
-- Units below `MIN_SCORE` are dropped. Ties go to prose sentences over table rows, then to
-  units with more distinct positive signals, then to page order.
-- While picking, a unit whose main figure was already picked loses points and has to compete
-  again (so a figure isn't caught twice). For variety, a unit also loses 2 for each chosen
-  unit already on its topic (-2, -4, -6...). Topics are revenue, gross profit, operating
-  income, net income, EPS, margin, guidance, cash flow, debt, dividends/buybacks,
-  growth/estimates and other. A sentence is guidance only when it's the company's own
-  forward-looking statement ("Lilypad expects", "full-year guidance", "next quarter", or
-  "revenue is expected to"); analysts' expectations are growth/estimates. The first table row
-  on a named topic is exempt, so a headline row like an infobox "Revenue" isn't crowded out
-  by sentences. The topic penalty only reorders the queue; it never drops a unit below
-  `MIN_SCORE` and isn't included in the displayed score.
-- About one target per 100 words of article (3 to 12, and at least 5 when 5 or more units
-  pass the threshold), at most 2 from one block and 4 rows from one table, then sorted into
-  page order so the frog only hops downward.
-
-After changing weights, run `python tools/snapshot_targets.py`. It prints how the picks
-and their fact records changed on each test page compared with `tests/snapshots/`; run it
-with `--update` to save the new picks once you're happy with them.
-
-## Fact records
-
-After picking targets, `facts.js` turns every figure it caught into a record:
-`FrogbotFacts.buildFacts(targets, blocks)`. Nothing is shown on the page yet; the records
-are for the stat card (Milestone 2). With debug on, they are logged with `console.table`
-at the end of a run (label, figure, role, period and source, both confidences, showOnCard,
-direction and its source, sentiment and vsEstimate).
-
-Each record has the figure (`value`, or `low`/`high` for a range, `type`, `currency`,
-`scale`, and a short `display` like "$482.6M" or "$505M–$525M"), plus:
-
-- **label**: the table row header, or the nearest finance term before the figure in the
-  same clause (except for a percentage that's a share of a group, "83% of S&P 500
-  companies", "24% having released results", which gets a snippet label) ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached:
-  GAAP / non-GAAP, adjusted, diluted, organic, a segment name ("Gaming revenue"), or a table
-  title. Guidance figures get "Guidance: <metric>". When no term is found, the label is a
-  short snippet of the text before the figure.
-- **role**: `level`, `change` (rose 14.2%, +19.1%, year-over-year), `guidance` or
-  `estimate` (analyst or consensus figures). A change is linked to the level with the same
-  label in the same clause or row (`change` on the level, `linkedTo` on the change).
-- **period** and **periodSource**: the period in the same clause (`clause`), then elsewhere
-  in the sentence (`sentence`), then the table column header (`table`), then the line that
-  introduces a list (`listIntro`, e.g. "NVIDIA's outlook for the third quarter of fiscal 2026
-  is as follows:"), then the nearest heading (`heading`, including bold-paragraph headings, and
-  the page's title until the first heading), then the page's most common period (`page`), or
-  none. Guidance never takes the page's period, since that is usually the quarter just
-  reported. A table's change column never takes a heading or page period.
-- **labelConfidence**: `high` for a table row header, or a finance term in the figure's own
-  clause; `medium` for a label with qualifiers or a segment, a term borrowed from an earlier
-  clause, or a guidance label; `low` for a snippet of the text before the figure.
-- **periodConfidence**: `high` for `clause`; `medium` for `sentence`, `table`, `listIntro`
-  and `heading`; `low` for `page`; null when there is no period. `periodInferred` is true when
-  it's `low`, so the card can show that period more faintly.
-- **confidence**: the lower of the two (a missing period doesn't lower it), kept for the
-  debug table.
-- **showOnCard**: true when the label is `high` or `medium` and the fact is a level, guidance,
-  or a change with no level to link to, and it isn't an earlier table column.
-- **priorPeriod** and **prior**: in a row with comparable period columns ("Q3 2026" and
-  "Q3 2025"), the earlier columns are `priorPeriod` (off the card, not in "Also caught"), and
-  the current figure's `prior` is the one it's compared with: `{ display, period }` (the same
-  period a year earlier, else the latest before it). Linked changes show beside their level; snippet-labelled
-  facts are left for the card's "Also caught" section.
-- **sources**: every place the figure was caught. The same figure with the same label,
-  period and qualifiers is merged into one record (money within 0.5%, percentages exactly),
-  keeping the most confident copy, prose before tables on a tie. Different qualifiers
-  (GAAP vs non-GAAP) are never merged.
-- **direction** (`up`, `down`, `flat` or null) and **directionSource**, for the card's arrows.
-  If the page doesn't make the direction plain, it is null; it is never guessed. In order:
-  - `changeColumn`: a signed or bracketed value in a table change column ("+8%", "(3)%",
-    "-3%", "0%"). An unsigned value ("56%" under "Y/Y") counts as up only when the page
-    writes its falls with brackets or minus signs in its tables, and the period columns the
-    change compares (the previous quarter for "Q/Q", a year earlier for "Y/Y") agree.
-  - `sign`: a signed change figure in prose ("+12.5%").
-  - `verb`: a change word near the figure in its clause: before it (not past the previous
-    figure) or right after it ("rose", "fell", "up", "lower", "unchanged", "a record $4.3
-    billion"). A negation within three words ("did not rise", "failed to grow") or a word
-    whose meaning depends on its subject ("the loss narrowed", "growth slowed") gives null.
-  - `fromTo`: "from $X to $Y" or "$Y, from $X": the two values compared. "$Y, up from $X"
-    and "$Y, down from $X" take the direction from the words, if the values agree with them.
-  - `tableColumns`: a row with current and prior period columns whose headers match apart
-    from their dates ("Q3 2026" / "Q3 2025"); the current figure is compared with the same
-    period a year earlier, else the latest before it. Direction only, no % is computed.
-
-  A linked change passes its direction to its level (if they disagree, the level gets
-  none). The earlier value in a comparison ("up 14.2% from $422.6 million") has no direction
-  and isn't linked to the change.
-- **sentiment** (`good`, `bad`, `neutral` or null): for canonical metrics only. Up is good for
-  revenue, profits, EPS, margins, cash flow, cash, dividends and buybacks; up is bad for
-  operating expenses, debt and losses; capital expenditure is neutral; flat is neutral.
-- **vsEstimate** (`above`, `below` or null): "beat", "above consensus", "missed", "below
-  estimates" said about the figure itself. It sets the sentiment when present (costs below
-  estimates are good).
-- **tolerance**: "plus or minus 2%", "±2%", "+/- 2%" or "plus or minus 50 basis points" on a
-  guidance figure is stored as `{ value, type, display }` and added to its display
-  ("$54.0B ±2%") instead of becoming its own fact.
-
-Money displays keep the page's decimal places when the unit matches ("$54.0 billion" shows
-as "$54.0B", "$84.0" in a table "in millions" as "$84.0M").
-
-## The stat card
-
-At the end of a run, if anything was caught, the frog hops to the bottom-right corner of the
-window, perches on the card's top-left corner and drops the card from its mouth (with reduced
-motion, both just appear). The frog and card are fixed to the window, so they stay put while
-the page scrolls; highlights stay on the page.
-
-- **Rows**: facts with `showOnCard`, one main row per metric (label with its qualifiers, plus
-  role; each guidance metric counts separately). A metric's main row is its most recent
-  period, then the higher label and period confidence, then the higher score; its other rows
-  only appear under "Show all". Metrics go by importance: revenue, gross profit, operating
-  income, net income, EPS, margins and cash flow, then guidance, then segment figures ("Data
-  Center revenue"), then everything else; within that, levels come before standalone changes.
-  A standalone change with a level for the same label and period only appears under "Show
-  all". The top 7 show, with "Show all (N)" for the rest.
-- **Columns**: Metric (guidance reads "Guidance · Revenue"), Figure (with a dot in its
-  highlight colour), Change (an arrow, ▲ up, ▼ down, ▬ flat, plus the linked change; green
-  good, red bad, grey otherwise; empty without a direction; a tooltip gives the earlier
-  column it's compared with, "vs $176.2M in Q3 2025") and Period (lighter and italic, with a
-  tooltip, when inferred from the page).
-- **Also caught (N)**: a collapsed list of the other facts (apart from changes shown beside
-  their level), snippet labels in quotes.
-- With no headline figures, the card says "No headline figures here" and keeps "Also caught".
-  With no facts at all, there is no card (the frog says "Nothing to catch here" when there are
-  no targets).
-- The card is a `role="dialog"`; its buttons are reachable with Tab. Only the card itself takes
-  clicks. It follows the browser's dark mode, and becomes a full-width bottom sheet in windows
-  narrower than 480px.
-- It lives in a shadow root on a zero-size host element with inline `!important` styles, so the
-  site's CSS can't change it and its CSS can't reach the page.
-- Releasing the frog again after a run replaces the card; releasing it mid-run does nothing.
-
-### Jumping back to a figure
-
-Every row (main table, "Show all" and "Also caught") is a button: click it, or press Enter or
-Space on it, and the page scrolls that figure's highlight to the middle of the window and
-pulses it (a short glow, twice); the frog on the card turns to look. A linked change goes with
-its level's row. A fact caught in several places goes to its best source first, and clicking
-the row again cycles through the others, with a "1/2" badge beside the figure. If the page has
-re-rendered and the highlight is gone, the block it came from is outlined instead (logged in
-debug mode). With reduced motion, the jump is instant and the figure gets a static outline.
-
-### Export
-
-- **Copy table** copies the main table and its "Show all" rows as tab-separated text with a
-  header row (Metric, Figure, Change, Direction, Period), values as displayed, ready to paste
-  into Excel or Google Sheets. It uses the clipboard API, falling back to a hidden textarea and
-  `execCommand("copy")` where that's refused (some `file://` pages). The button says "Copied ✓"
-  (or "Copy failed") for a moment.
-- **Download CSV** saves `frogbot-<site>-<yyyy-mm-dd>.csv` (no extra permissions): every row,
-  with a `section` column (`main` or `also caught`), then metric, figure, value (a plain
-  number), low, high, currency, type, role, change, direction, sentiment, period,
-  period_inferred, prior, source_text (the sentence or row, up to 200 characters), page_url and
-  captured_at. Fields with commas, quotes or line breaks are quoted, and the file starts with a
-  UTF-8 BOM so Excel shows £, € and – correctly.
-
-## Measuring accuracy honestly
-
-There are two sets of test cases, and the runner reports them separately:
-
-- **Development set** (`tests/detect-cases.js`): the cases `score.js` was built and fixed
-  against. Every time a bug turns up, a case for it goes here and the code is changed until
-  it passes. That makes this set's accuracy close to 100% by construction, so it shows that
-  known problems stay fixed, not how well detection works on pages it hasn't seen.
-- **Held-out set** (`tests/holdout-cases.js`): cases written by hand from pages that were
-  never used in development, and never used as a reason to change the code. Its accuracy is
-  the honest estimate of how Frogbot does on a new article.
+To add a detection case, copy one in `tests/detect-cases.js`: give the text, where it came
+from, and the numbers you expect. Only the fields you list are checked, but every number found
+must be expected.
 
 To add held-out cases:
 
@@ -309,84 +237,174 @@ To add held-out cases:
    *before* running the tests.
 3. Run the tests and record the held-out accuracy. If a case fails, don't change the code to
    fix that case. Write a new development case that shows the same problem, fix against that,
-   and leave the held-out case untouched. Then add fresh held-out cases from another new page
-   from time to time, since the old ones slowly stop being "unseen".
+   and leave the held-out case untouched. Add fresh held-out cases from another new page from
+   time to time, since the old ones slowly stop being "unseen".
 
 The three entries already in `holdout-cases.js` are format examples marked `example: true`;
 the runner skips them, so it reports "No held-out cases yet" until real ones are added.
 
-## Known issues
+### Test pages
 
-- **Timing checks vary with machine load.** The browser checks time scoring on the Nvidia
-  release against 50ms; it usually takes about 30ms, but runs well above that when the machine
-  is busy (other browsers open, for example).
-- **Pages that scroll inside a box.** Some sites (currently BBC) scroll the article inside
-  an inner container instead of scrolling the page itself, sometimes switching to that only
-  after the frog appears. The frog is positioned on the page, so its scroll-in check can fail
-  there. It still lands next to its targets. To be handled in a later step.
-- **Start position on those pages.** The same layout switch occasionally moves BBC's first
-  paragraph under the frog after it has appeared, so the frog can end up sitting on text.
+- `test-pages/earnings-sample.html`: a fictional earnings release for "Lilypad Holdings", with
+  real-looking figures plus junk numbers (phone numbers, a street address, a page number,
+  footnote markers, a copyright year) for the scorer to ignore. Add `?frogbot-fixed` to its URL
+  to make the frog hop to four hand-placed targets instead of scored ones (useful for checking
+  the animation).
+- `test-pages/mapping.html`: tricky markup for exact highlighting: figures split across `<b>`,
+  `<a>` and `<span>`, `&nbsp;`, Wikipedia-style `[1]` markers, line breaks and table cells. Each
+  case lists what should be highlighted in `data-expect-figures`.
+- `test-pages/captions-and-collapsed.html`: a news-style article for checking what extraction
+  skips: photo captions and credits, a key-points box, a collapsed AI summary, a closed
+  `<details>` and a squashed hidden box, each marked `data-expect="keep"` or `"skip"`.
 
-## Backlog
+### Debug view
 
-- Pages that scroll the article inside an inner container (see Known issues): position the frog
-  inside that container, or follow its scrolling.
-- An optional subtle tint on the chosen sentence, so a figure reads in context. Left out for now
-  because it looked cluttered next to the coloured figure highlights.
-- Re-map highlights when a page re-renders its content after the frog has run (marks placed
-  before a re-render are lost, though Escape still cleans up).
-- Detect numbers during extraction, so scoring doesn't compute them a second time. Scoring
-  takes about 30ms on a big earnings release (the Nvidia release), which is acceptable for now.
-- "to" and "from" are loose change words (they match "returned $24.3 billion to
-  shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
-  like "from X to Y" or right after a change verb ("rose to", "fell from").
-- Direction for words whose meaning depends on their subject: a loss that "narrowed" or
-  "widened", a decline that "eased", growth that "slowed" or "accelerated". These give no
-  direction for now.
-- Direction for a change that shares an earlier change word: in "up 20% from the previous
-  quarter and 73% year-over-year", the 73% has no direction of its own yet.
-- Tighten the passive "is expected to" guidance rule to require a company subject. At the
-  moment it can tag industry-wide forecasts as guidance (for example BBC's "the tech industry
-  is expected to spend a combined $765bn" sentence).
+Tick **Show what Frogbot reads** in the popup before releasing the frog (the setting is
+remembered). Frogbot then outlines everything it extracted: the main content container in solid
+red, and every block in a dashed outline coloured by type (paragraph grey, list green, table
+blue, heading purple, quote orange) with an `index type · score` label; chosen targets get a
+solid outline. The page's DevTools console gets tables of the blocks, the numbers found by type
+(and how many were junk), every scored sentence and table row with its reasons, and the fact
+records, with timings for extraction, detection and scoring. Escape clears the outlines with
+the frog.
 
-## Editing the frog artwork
+### How targets are scored
+
+`score.js` scores every unit with `scoreUnit()` and picks targets with `pickTargets()`:
+
+- Points for money, percentages and per-share figures, a change word near a number, finance
+  terms, periods, comparisons and context (bold text, a heading with a number, or a table row
+  without column headers; rows with headers get the period point from them instead), and
+  penalties for units with only counts or years, only junk, or over 60 words, and for old
+  figures: a unit whose newest explicit year is 5-9 years older than the newest year on the
+  page loses 2, and 10 or more years older loses 4 (not when it names a current period such
+  as "Q3", or has no year). Every weight, and the topic list below, is in the `WEIGHTS` object
+  at the top of `score.js`.
+- Units below `MIN_SCORE` are dropped. Ties go to prose sentences over table rows, then to
+  units with more distinct positive signals, then to page order.
+- While picking, a unit whose main figure was already picked loses points and has to compete
+  again. For variety, a unit also loses 2 for each chosen unit already on its topic (-2, -4,
+  -6...). Topics are revenue, gross profit, operating income, net income, EPS, margin,
+  guidance, cash flow, debt, dividends/buybacks, growth/estimates and other. A sentence is
+  guidance only when it's the company's own forward-looking statement ("Lilypad expects",
+  "full-year guidance", "next quarter", or "revenue is expected to"); analysts' expectations
+  are growth/estimates. The first table row on a named topic is exempt, so a headline row like
+  an infobox "Revenue" isn't crowded out by sentences. The topic penalty only reorders the
+  queue; it never drops a unit below `MIN_SCORE`.
+- About one target per 100 words of article (3 to 12, and at least 5 when 5 or more units pass
+  the threshold), at most 2 from one block and 4 rows from one table, then sorted into page
+  order.
+
+### Fact records
+
+`FrogbotFacts.buildFacts(targets, blocks)` turns every caught figure into a record. Each has
+the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, and a short
+`display` like "$482.6M" or "$505M–$525M"), plus:
+
+- **label**: the table row header, or the nearest finance term before the figure in the same
+  clause ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached: GAAP /
+  non-GAAP, adjusted, diluted, organic, a segment name ("Gaming revenue"), or a table title.
+  Guidance figures get "Guidance: <metric>". A percentage that's a share of a group ("83% of
+  S&P 500 companies", "24% having released results") takes no metric label. When no term is
+  found, the label is a short snippet of the text around the figure.
+- **role**: `level`, `change` (rose 14.2%, +19.1%, year-over-year), `guidance` or `estimate`
+  (analyst or consensus figures). A change is linked to the level with the same label in the
+  same clause or row (`change` on the level, `linkedTo` on the change); a level shows a
+  percentage change over an amount.
+- **period** and **periodSource**: the period in the same clause (`clause`), then elsewhere in
+  the sentence (`sentence`), then the table column header (`table`), then the line that
+  introduces a list (`listIntro`), then the nearest heading (`heading`, including bold-paragraph
+  headings, and the page's title until the first heading), then the page's most common period
+  (`page`), or none. Guidance never takes the page's period, since that is usually the quarter
+  just reported. A table's change column never takes a heading or page period.
+- **labelConfidence**: `high` for a table row header, or a finance term in the figure's own
+  clause; `medium` for a label with qualifiers or a segment, a term borrowed from an earlier
+  clause, or a guidance label; `low` for a snippet.
+- **periodConfidence**: `high` for `clause`; `medium` for `sentence`, `table`, `listIntro` and
+  `heading`; `low` for `page`; null when there is no period. `periodInferred` is true when it's
+  `low`. **confidence** is the lower of the two (a missing period doesn't lower it).
+- **showOnCard**: true when the label is `high` or `medium` and the fact is a level, guidance,
+  or a change with no level to link to, and it isn't an earlier table column.
+- **priorPeriod** and **prior**: in a row with comparable period columns ("Q3 2026" and
+  "Q3 2025"), the earlier columns are `priorPeriod` (off the card), and the current figure's
+  `prior` is the one it's compared with (the same period a year earlier, else the latest
+  before it).
+- **sources**: every place the figure was caught. The same figure with the same label, period
+  and qualifiers is merged into one record (money within 0.5%, percentages exactly), keeping the
+  most confident copy. Different qualifiers (GAAP vs non-GAAP) are never merged.
+- **direction** (`up`, `down`, `flat` or null) and **directionSource**. If the page doesn't
+  make the direction plain, it is null. In order:
+  - `changeColumn`: a signed or bracketed value in a table change column ("+8%", "(3)%",
+    "-3%", "0%"). An unsigned value ("56%" under "Y/Y") counts as up only when the page writes
+    its falls with brackets or minus signs in its tables, and the period columns the change
+    compares agree.
+  - `sign`: a signed change figure in prose ("+12.5%").
+  - `verb`: a change word near the figure in its clause ("rose", "fell", "up", "lower",
+    "unchanged", "a record $4.3 billion"). A negation within three words ("did not rise",
+    "failed to grow") or a word whose meaning depends on its subject ("the loss narrowed",
+    "growth slowed") gives null.
+  - `fromTo`: "from $X to $Y", "$Y, from $X", or "$Y, up from $X" when the values agree with
+    the words.
+  - `tableColumns`: a row with current and prior period columns whose headers match apart from
+    their dates. Direction only; no percentage is computed.
+
+  A linked change passes its direction to its level (if they disagree, the level gets none).
+- **sentiment** (`good`, `bad`, `neutral` or null), for canonical metrics only. Up is good for
+  revenue, profits, EPS, margins, cash flow, cash, dividends and buybacks; up is bad for
+  operating expenses, debt and losses; capital expenditure is neutral; flat is neutral.
+- **vsEstimate** (`above`, `below` or null): "beat", "above consensus", "missed", "below
+  estimates" said about the figure itself. It sets the sentiment when present.
+- **tolerance**: "plus or minus 2%", "±2%" or "plus or minus 50 basis points" on a guidance
+  figure is added to its display ("$54.0B ±2%") instead of becoming its own fact.
+
+Money displays keep the page's decimal places when the unit matches ("$54.0 billion" shows as
+"$54.0B").
+
+### The card in detail
+
+- **Rows**: one main row per metric (label with its qualifiers, plus role). A metric's main row
+  is its most recent period, then the higher label and period confidence, then the higher
+  score; its other rows only appear under "Show all". Metrics go by importance: revenue, gross
+  profit, operating income, net income, EPS, margins and cash flow, then guidance, then segment
+  figures, then everything else; within that, levels come before standalone changes.
+- **Columns**: Metric, Figure (with a dot in its highlight colour), Change (arrow plus the
+  linked change; a tooltip gives the earlier column it's compared with, "vs $176.2M in
+  Q3 2025") and Period (lighter and italic, with a tooltip, when inferred from the page).
+- **Also caught (N)**: the other facts, apart from changes shown beside their level and earlier
+  table columns. With no headline figures the card says "No headline figures here"; with no
+  facts at all there is no card.
+- **Jumping back**: every row is a button (click, Enter or Space). The page scrolls the figure
+  to the middle of the window and pulses it, and the frog turns to look. A fact caught in
+  several places cycles through them, with a "1/2" badge. If the highlight has gone because the
+  page re-rendered, the block it came from is outlined instead. With reduced motion, the jump is
+  instant and the figure gets a static outline.
+- **Copy table** copies the main table and its "Show all" rows as tab-separated text (Metric,
+  Figure, Change, Direction, Period), falling back to `execCommand("copy")` where the clipboard
+  API is refused.
+- **Download CSV** saves `frogbot-<site>-<yyyy-mm-dd>.csv` with every row: section, metric,
+  figure, value, low, high, currency, type, role, change, direction, sentiment, period,
+  period_inferred, prior, source_text, page_url and captured_at. It starts with a UTF-8 BOM so
+  Excel shows £, € and – correctly.
+- The card is a `role="dialog"`, follows the browser's dark mode, and becomes a full-width
+  bottom sheet in windows narrower than 480px. It lives in a shadow root on a zero-size host
+  element with inline `!important` styles, so only the card takes clicks and the site's CSS
+  can't change it. Releasing the frog again after a run replaces the card; releasing it mid-run
+  does nothing.
+
+### Editing the frog artwork and icons
 
 `assets/frog.svg` is the source of truth for the frog. `content/frog.js` holds a copy of it
-between the `// FROG_SVG_START` and `// FROG_SVG_END` comments, so the legs can be animated
-with CSS. After editing the SVG:
+between the `// FROG_SVG_START` and `// FROG_SVG_END` comments, so the legs can be animated with
+CSS. After editing the SVG, run `python tools/sync_frog_svg.py` and reload Frogbot in the
+extensions page. Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles
+them.
 
-1. Run `python tools/sync_frog_svg.py` (Python 3, no extra packages).
-2. Reload Frogbot in `chrome://extensions`.
+The extension icons come from `assets/icon.svg` (32, 48 and 128px) and the simplified
+`assets/icon-small.svg` (16px). After editing either, run `python tools/build_icons.py`, which
+renders them with headless Edge or Chrome.
 
-Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles them.
+## License and author
 
-## Roadmap
+MIT; see [LICENSE](LICENSE).
 
-- **Milestone 1: frog, hopping, tongue, extraction, number detection, scoring and
-  exact-number highlighting (done).**
-  - Steps 1–3: skeleton, test page and a static frog injected on click
-  - Steps 4–5: hopping with leg animation, and a tongue flick that highlights each target
-  - Step 6: reading the page with `extract.js`, which finds the main content and splits it
-    into paragraph, list, table, heading and quote blocks, plus the debug view
-  - Step 7: number detection in `score.js`: every number in a text with its type (money,
-    percent, basis points, per share, multiple, period, date, year, count), value, currency,
-    scale, ranges and negatives, with junk like phone numbers flagged, plus a test suite
-  - Step 8: scoring sentences and table rows and choosing the frog's targets
-  - Step 9: exact-number highlighting, coloured by type, with the tongue aimed at each figure
-- **Milestone 2: end-of-page stat card (done).** A small table of the key figures the frog
-  caught, with up/down arrows for changes; clicking a row jumps back to the figure, and the
-  table can be copied or downloaded as CSV.
-  - Step 10: fact records in `facts.js`: a label, role, period, label and period confidence,
-    and card eligibility for each caught figure, with changes linked to their levels and
-    duplicates merged (no UI yet)
-  - Step 11: change direction (from signs, change words, from/to, change columns and period
-    columns), sentiment for known metrics, beat/miss against estimates, and guidance
-    tolerances (no UI yet)
-  - Step 12: the stat card, delivered by the frog at the end of a run: importance-ordered rows
-    with arrows and sentiment colours, "Show all", "Also caught", dark mode and a bottom
-    sheet on narrow windows
-  - Step 13: click a row to jump back to its figure (cycling through several sources), Copy
-    table and Download CSV
-- **Milestone 3: AI summary (not started).** A short summary written only from the chosen
-  sentences, with a check that every number in the summary appears on the page. On-device AI
-  where the browser has it, and a rules-only fallback otherwise.
+Built by Daniel ([github.com/DanGallagher06](https://github.com/DanGallagher06)).

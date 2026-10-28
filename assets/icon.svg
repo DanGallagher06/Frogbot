@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Frogbot's icon: the white frog face from the stat card's header, on frog green.
+       Rendered to assets/icon-32.png, icon-48.png and icon-128.png by tools/build_icons.py
+       (icon-16.png comes from the simplified icon-small.svg). -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#2e9d4f"/>
+  <g transform="translate(16 20) scale(4)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+    <circle cx="7" cy="8" r="3.5"/>
+    <circle cx="17" cy="8" r="3.5"/>
+    <circle cx="7" cy="8" r="1.2" fill="#ffffff" stroke="none"/>
+    <circle cx="17" cy="8" r="1.2" fill="#ffffff" stroke="none"/>
+    <path d="M4.5 14.5c4 4.5 11 4.5 15 0"/>
+  </g>
+</svg>
