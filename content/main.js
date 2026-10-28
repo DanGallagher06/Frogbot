@@ -29,6 +29,11 @@
 
   let cancelled = false;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Each caught figure's marks, by "blockIndex:offset" (the same key as a fact's sources), so
+  // the stat card can jump back to them.
+  const markIndex = new Map();
+  const figureKey = (blockIndex, offset) => `${blockIndex}:${offset}`;
 
   function docRect(el) {
     const r = el.getBoundingClientRect();
@@ -89,11 +94,14 @@
   // fallback is true if any figure couldn't be mapped to the page; the whole block or row is
   // then highlighted too.
   function planFigures(target) {
-    const groups = []; // [{ items: [{ block, start, end, type, raw }] }]
+    const groups = []; // [{ items: [{ block, start, end, type, raw }], key }]
     for (const unit of target.units) {
+      // Offsets as facts record them: within the block's text for sentences, the row's text for rows.
+      const base = unit.kind === "row" || !unit.sentence ? 0 : unit.sentence.start;
       for (const group of Score.figureGroups(unit.numbers || [], unit.text)) {
-        const items = [group.figure, ...group.extras].map((n) => locate(unit, n)).filter(Boolean);
-        if (items.length) groups.push({ items });
+        const figure = locate(unit, group.figure);
+        const items = [figure, ...group.extras.map((n) => locate(unit, n))].filter(Boolean);
+        if (items.length) groups.push({ items, figure, key: figureKey(unit.blockIndexes[0], base + group.figure.start) });
       }
     }
     if (!groups.length) return { flicks: [], fallback: false };
@@ -110,6 +118,10 @@
         if (debug) console.log(`Frogbot: couldn't map "${item.raw}" to the page; highlighting the whole block`, item.block.element);
       }
     });
+
+    for (const group of groups) {
+      if (group.figure && group.figure.marks) markIndex.set(group.key, group.figure.marks);
+    }
 
     const flicks = [];
     groups.forEach((group, i) => {
@@ -380,7 +392,7 @@
   // drops the card from its mouth. Both stay put while the page scrolls.
   async function deliverCard() {
     if (cancelled) return;
-    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove() });
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo });
     const rect = Card.rect();
     const perch = {
       x: Math.max(rect.left + CARD_PERCH.dx, FROG_SIZE / 2 + 4),
@@ -390,8 +402,29 @@
     if (cancelled) return;
     await Frogbot.faceTowards(perch.x, perch.y + FROG_SIZE); // face down onto the card
     if (cancelled) return;
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    await Card.reveal({ origin: Frogbot.mouthPosition(), animate: !reduced });
+    await Card.reveal({ origin: Frogbot.mouthPosition(), animate: !reducedMotion() });
+  }
+
+  // A row on the card was clicked: scroll one of the fact's sources to the middle of the
+  // window and pulse its figure, with the frog turning to look. If its marks have gone (the
+  // site re-rendered), outline the block it came from instead.
+  function jumpTo(fact, index) {
+    if (cancelled) return;
+    const source = fact.sources[index] || fact.sources[0];
+    const marks = (markIndex.get(figureKey(source.blockIndex, source.matchStart)) || []).filter((m) => m.isConnected);
+    let target = marks[0];
+    if (!target) {
+      const block = blocks[source.blockIndex];
+      target = block && block.element.isConnected ? block.element : null;
+      if (debug) console.log(`Frogbot: the highlight for ${fact.label} ${fact.display} has gone; outlining its block instead`, target);
+      if (!target) return;
+    }
+    // scrollIntoView also scrolls any inner container the figure sits in.
+    target.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center", inline: "nearest" });
+    Highlight.endPulses(); // one figure at a time
+    Highlight.pulse(marks.length ? marks : [target], { outline: reducedMotion() || !marks.length });
+    const r = target.getBoundingClientRect();
+    Frogbot.faceTowards(r.left + r.width / 2, innerHeight / 2).catch(() => {});
   }
 
   // Debug only: the fact records built from this run's targets.

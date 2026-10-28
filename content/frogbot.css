@@ -207,8 +207,28 @@ mark.frogbot-num.frogbot-num-on.frogbot-num-count {
   box-shadow: 0 0 0 2px rgba(158, 158, 158, 0.35) !important;
 }
 
+/* ---- Jumping back from the stat card ----
+   A caught figure glows twice; with reduced motion (or when its marks have gone and its block
+   stands in) it gets a static outline instead. Outlines don't affect layout. */
+
+mark.frogbot-num.frogbot-num-on.frogbot-pulse {
+  animation: frogbot-pulse 600ms ease-in-out 2 !important;
+}
+
+/* The marks' box-shadow is !important (it beats animations), so the glow is an outline. */
+@keyframes frogbot-pulse {
+  0%, 100% { outline: 0 solid rgba(46, 157, 79, 0); outline-offset: 1px; }
+  50% { outline: 6px solid rgba(46, 157, 79, 0.55); outline-offset: 1px; }
+}
+
+.frogbot-outline.frogbot-outline {
+  outline: 3px solid #2e9d4f !important;
+  outline-offset: 2px !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   mark.frogbot-num { transition: none; }
+  mark.frogbot-num.frogbot-num-on.frogbot-pulse { animation: none !important; }
   .frogbot-frog .frogbot-leg { transition: none; }
   .frogbot-hl.frogbot-hl.frogbot-hl { animation: none; }
 }

@@ -264,6 +264,30 @@ the page scrolls; highlights stay on the page.
   site's CSS can't change it and its CSS can't reach the page.
 - Releasing the frog again after a run replaces the card; releasing it mid-run does nothing.
 
+### Jumping back to a figure
+
+Every row (main table, "Show all" and "Also caught") is a button: click it, or press Enter or
+Space on it, and the page scrolls that figure's highlight to the middle of the window and
+pulses it (a short glow, twice); the frog on the card turns to look. A linked change goes with
+its level's row. A fact caught in several places goes to its best source first, and clicking
+the row again cycles through the others, with a "1/2" badge beside the figure. If the page has
+re-rendered and the highlight is gone, the block it came from is outlined instead (logged in
+debug mode). With reduced motion, the jump is instant and the figure gets a static outline.
+
+### Export
+
+- **Copy table** copies the main table and its "Show all" rows as tab-separated text with a
+  header row (Metric, Figure, Change, Direction, Period), values as displayed, ready to paste
+  into Excel or Google Sheets. It uses the clipboard API, falling back to a hidden textarea and
+  `execCommand("copy")` where that's refused (some `file://` pages). The button says "Copied ✓"
+  (or "Copy failed") for a moment.
+- **Download CSV** saves `frogbot-<site>-<yyyy-mm-dd>.csv` (no extra permissions): every row,
+  with a `section` column (`main` or `also caught`), then metric, figure, value (a plain
+  number), low, high, currency, type, role, change, direction, sentiment, period,
+  period_inferred, prior, source_text (the sentence or row, up to 200 characters), page_url and
+  captured_at. Fields with commas, quotes or line breaks are quoted, and the file starts with a
+  UTF-8 BOM so Excel shows £, € and – correctly.
+
 ## Measuring accuracy honestly
 
 There are two sets of test cases, and the runner reports them separately:
@@ -349,8 +373,9 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
     scale, ranges and negatives, with junk like phone numbers flagged, plus a test suite
   - Step 8: scoring sentences and table rows and choosing the frog's targets
   - Step 9: exact-number highlighting, coloured by type, with the tongue aimed at each figure
-- **Milestone 2: end-of-page stat card (in progress).** A small table of the key figures the
-  frog caught, with up/down arrows for changes; clicking a figure scrolls back to it.
+- **Milestone 2: end-of-page stat card (done).** A small table of the key figures the frog
+  caught, with up/down arrows for changes; clicking a row jumps back to the figure, and the
+  table can be copied or downloaded as CSV.
   - Step 10: fact records in `facts.js`: a label, role, period, label and period confidence,
     and card eligibility for each caught figure, with changes linked to their levels and
     duplicates merged (no UI yet)
@@ -360,6 +385,8 @@ Keep the leg groups' `frogbot-leg-*` classes, since the hop animation styles the
   - Step 12: the stat card, delivered by the frog at the end of a run: importance-ordered rows
     with arrows and sentiment colours, "Show all", "Also caught", dark mode and a bottom
     sheet on narrow windows
+  - Step 13: click a row to jump back to its figure (cycling through several sources), Copy
+    table and Download CSV
 - **Milestone 3: AI summary (not started).** A short summary written only from the chosen
   sentences, with a check that every number in the summary appears on the page. On-device AI
   where the browser has it, and a rules-only fallback otherwise.

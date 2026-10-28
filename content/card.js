@@ -149,13 +149,38 @@
       font-variant-numeric: tabular-nums;
     }
     details li .fig { color: var(--fg); white-space: nowrap; }
+    /* Rows are buttons: they jump to their figure on the page. */
+    tr[role="button"], li[role="button"] { cursor: pointer; }
+    tr[role="button"]:focus-visible, li[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    details li[role="button"] { margin: 0 -6px; padding: 3px 6px; border-radius: 4px; }
+    details li[role="button"]:hover { background: var(--row-hover); }
+    .count {
+      margin-left: 5px;
+      padding: 0 4px;
+      border-radius: 4px;
+      background: var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+    }
     .foot {
       flex: none;
-      padding: 7px 14px 9px;
+      padding: 8px 14px 9px;
       border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: 11px;
     }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+    .action {
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent-dark);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .action:hover { background: var(--row-hover); }
     @media (prefers-color-scheme: dark) {
       .card {
         --bg: #1d2420;
@@ -280,7 +305,34 @@
 
   const metricText = (f) => f.label.replace(/^Guidance:\s*/, "Guidance · ");
 
-  function row(f) {
+  // Clicking (or Enter / Space on) a row jumps to its figure on the page. A fact caught in
+  // several places goes to its best source first, then cycles through the others, with a
+  // "1/2" badge beside the figure.
+  function jumpable(node, f, figureEl, onJump) {
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-label", `${metricText(f)} ${f.display}: show on the page`);
+    const count = f.sources.length;
+    const best = Math.max(0, f.sources.findIndex((s) => s.blockIndex === f.blockIndex && s.matchStart === f.matchStart));
+    let current = -1;
+    const go = () => {
+      current = current < 0 ? best : (current + 1) % count;
+      if (count > 1) {
+        let badge = figureEl.querySelector(".count");
+        if (!badge) badge = figureEl.appendChild(el("span", "count"));
+        badge.textContent = `${((current - best + count) % count) + 1}/${count}`;
+      }
+      if (onJump) onJump(f, current);
+    };
+    node.addEventListener("click", go);
+    node.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      go();
+    });
+  }
+
+  function row(f, onJump) {
     const tr = el("tr");
     tr.dataset.factId = f.id;
     tr.appendChild(el("td", "metric", metricText(f)));
@@ -307,10 +359,12 @@
       period.title = "Period inferred from the page";
     }
     tr.appendChild(period);
+    jumpable(tr, f, figure, onJump);
     return tr;
   }
 
-  function build(facts, onClose) {
+  function build(facts, options) {
+    const { onClose, onJump } = options;
     const { rows, also } = arrange(facts);
     const root = el("div", "card measuring");
     root.setAttribute("role", "dialog");
@@ -348,7 +402,7 @@
       table.appendChild(thead);
       const tbody = el("tbody");
       for (const r of rows) {
-        const tr = row(r.fact);
+        const tr = row(r.fact, onJump);
         if (!r.visible) tr.classList.add("extra");
         tbody.appendChild(tr);
       }
@@ -378,15 +432,130 @@
         li.dataset.factId = f.id;
         const label = f.labelConfidence === "low" ? `“${f.label}”` : `${metricText(f)}${f.role === "estimate" ? " (estimate)" : ""}`;
         li.appendChild(el("span", "label", label));
-        li.appendChild(el("span", "fig", f.display));
+        const fig = li.appendChild(el("span", "fig", f.display));
+        jumpable(li, f, fig, onJump);
         list.appendChild(li);
       }
       details.appendChild(list);
       body.appendChild(details);
     }
     root.appendChild(body);
-    root.appendChild(el("div", "foot", "Figures taken directly from this page · Not financial advice"));
+
+    const foot = el("div", "foot");
+    const actions = el("div", "actions");
+    const copy = el("button", "action copy", "Copy table");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      const ok = await copyText(tableText(rows), root);
+      copy.textContent = ok ? "Copied ✓" : "Copy failed";
+      copy.focus();
+      setTimeout(() => (copy.textContent = "Copy table"), 1500);
+    });
+    const download = el("button", "action csv", "Download CSV");
+    download.type = "button";
+    download.addEventListener("click", () => downloadCsv(rows, also, root));
+    actions.append(copy, download);
+    foot.appendChild(actions);
+    foot.appendChild(el("div", "note", "Figures taken directly from this page · Not financial advice"));
+    root.appendChild(foot);
     return root;
+  }
+
+  // ---- Export ----
+
+  const collapse = (s) => (s || "").replace(/\s+/g, " ").trim();
+  const changeText = (f) => (f.direction && f.change ? f.change.display.replace(/^[+\-−]/, "") : "");
+
+  // The main table (with the "Show all" rows) as tab-separated text, values as displayed.
+  function tableText(rows) {
+    const cell = (v) => collapse(String(v ?? "")).replace(/\t/g, " ");
+    const lines = [["Metric", "Figure", "Change", "Direction", "Period"]];
+    for (const { fact: f } of rows) {
+      lines.push([metricText(f), f.display, changeText(f), f.direction || "", f.period ? f.period.text : ""]);
+    }
+    return lines.map((line) => line.map(cell).join("\t")).join("\n") + "\n";
+  }
+
+  // The clipboard API first; where it's refused (some file:// pages), a hidden textarea and
+  // execCommand("copy"). The textarea lives in the card's shadow root, not the page.
+  async function copyText(text, container) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back below.
+    }
+    const area = el("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position: fixed; left: -9999px; top: 0; opacity: 0;";
+    container.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+
+  const CSV_COLUMNS = [
+    "section", "metric", "figure", "value", "low", "high", "currency", "type", "role", "change", "direction",
+    "sentiment", "period", "period_inferred", "prior", "source_text", "page_url", "captured_at",
+  ];
+
+  // Quote a field holding a comma, quote or line break, doubling any quotes.
+  function csvField(value) {
+    const s = value == null ? "" : String(value);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  // Every row (main, "Show all" and "Also caught") as CSV, with a UTF-8 BOM so Excel reads
+  // £, € and – correctly.
+  function csvText(rows, also) {
+    const capturedAt = new Date().toISOString();
+    const record = (f, section) => ({
+      section,
+      metric: metricText(f),
+      figure: f.display,
+      value: f.value,
+      low: f.low,
+      high: f.high,
+      currency: f.currency,
+      type: f.type,
+      role: f.role,
+      change: f.change ? f.change.display : "",
+      direction: f.direction,
+      sentiment: f.sentiment,
+      period: f.period ? f.period.text : "",
+      period_inferred: f.periodInferred ? "true" : "false",
+      prior: f.prior ? `${f.prior.display} in ${f.prior.period}` : "",
+      source_text: collapse(f.sentence).slice(0, 200),
+      page_url: location.href,
+      captured_at: capturedAt,
+    });
+    const records = [...rows.map((r) => record(r.fact, "main")), ...also.map((f) => record(f, "also caught"))];
+    const lines = [CSV_COLUMNS.join(","), ...records.map((r) => CSV_COLUMNS.map((c) => csvField(r[c])).join(","))];
+    return "\uFEFF" + lines.join("\r\n") + "\r\n";
+  }
+
+  // frogbot-<site>-<yyyy-mm-dd>.csv, saved with a Blob and a temporary download link.
+  function downloadCsv(rows, also, container) {
+    const site = (location.hostname.replace(/^www\./, "") || "local").replace(/[^a-z0-9.-]+/gi, "-");
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const name = `frogbot-${site}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+    const url = URL.createObjectURL(new Blob([csvText(rows, also)], { type: "text/csv;charset=utf-8" }));
+    const link = el("a");
+    link.href = url;
+    link.download = name;
+    link.style.display = "none";
+    container.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   // The host is a zero-size fixed box, so only the card itself takes clicks. Inline
@@ -419,7 +588,8 @@
 
   window.FrogbotCard = {
     // Renders the card. options.hidden: lay it out invisibly (to measure where the frog
-    // should land) until reveal(). options.onClose: the × button.
+    // should land) until reveal(). options.onClose: the × button. options.onJump(fact,
+    // sourceIndex): a row was clicked.
     show(facts, options = {}) {
       this.hide();
       host = makeHost();
@@ -427,7 +597,7 @@
       const style = el("style");
       style.textContent = STYLE;
       shadow.appendChild(style);
-      card = build(facts, options.onClose);
+      card = build(facts, options);
       shadow.appendChild(card);
       document.documentElement.appendChild(host);
       if (!options.hidden) this.reveal(options);
