@@ -158,8 +158,8 @@ Held-out accuracy: to be measured.
   figure's block instead).
 - Detect numbers during extraction, so scoring doesn't compute them a second time. Scoring
   takes about 30ms on a big earnings release, which is acceptable for now. Timings vary with
-  machine load (60-80ms is common on a busy machine), so they're logged for information rather
-  than treated as a pass/fail test; only times above 150ms would point to a real problem.
+  machine load (60-80ms is common on a busy machine), so the browser suite logs the scoring time
+  for information and only fails above 150ms, which would point to a real problem.
 - "to" and "from" are loose change words (they match "returned $24.3 billion to
   shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
   like "from X to Y" or right after a change verb ("rose to", "fell from").
@@ -201,8 +201,8 @@ content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
 assets/              The frog artwork and the extension icons (with their SVG sources)
 docs/                The demo GIF and screenshots used in this README
 test-pages/          Local pages written for testing (no copied pages)
-tests/               Test cases, the browser test runner, and snapshots of each test page's
-                     targets and fact records
+tests/               Test cases, the browser test runner, snapshots of each test page's
+                     targets and fact records, and the optional browser suites (tests/browser/)
 tools/               Developer scripts (not part of the extension)
 ```
 
@@ -223,6 +223,45 @@ The tools need Python 3 and nothing else, apart from one optional script:
 `tools/record_demo.py` re-records `docs/demo.gif` and the README screenshots from the test page,
 and needs Selenium and Pillow (`pip install selenium pillow`). It's only needed to update the
 GIF.
+
+### Browser suites (optional)
+
+`tests/browser/` holds end-to-end suites that run the real extension code in headless Edge:
+the frog's hops and tongue, extraction and the debug view, number detection on real pages,
+scoring and target choice, exact highlighting and exact restore, fact records on real pages, the
+card, and the card's row clicks and exports. They need Selenium (`pip install selenium`).
+
+```
+python tests/browser/run_all.py            # every suite, with a summary at the end
+python tests/browser/test_card.py          # or any one suite on its own
+python tests/browser/run_all.py --skip-live
+```
+
+| Suite | Covers |
+| --- | --- |
+| `test_hops.py` | Hopping, the tongue's reach and timing, Escape at any point, releasing again, reduced motion |
+| `test_extraction.py` | What extraction keeps and skips, the debug view, the frog's start position |
+| `test_detection.py` | Number counts and junk on real pages, detection speed |
+| `test_scoring.py` | Target choice, no junk or repeated figures, hopping downward, scoring time |
+| `test_highlights.py` | Exact figure highlighting, and the page restored byte for byte after Escape |
+| `test_facts_pages.py` | Every fact's figure appears on its page, and none is junk |
+| `test_card.py` | The card's rows and order, dark mode, the bottom sheet, isolation from site CSS |
+| `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV |
+
+They use three kinds of page:
+
+- **Test pages** in `test-pages/`, which are always there.
+- **Saved copies** of real pages in `test-pages/local/` (the Wikipedia articles on Nvidia and
+  Apple, and a Forbes article). They aren't in the repo, since they're other sites' content. If
+  a copy is missing, its checks are skipped with a message naming the file to save there.
+- **Live sites** (Nvidia's and Apple's results releases, and two BBC articles). Their checks
+  are marked `[live]` and can fail when a site changes or can't be reached; `--skip-live` (or
+  `FROGBOT_SKIP_LIVE=1`) skips them.
+
+Each suite prints `PASS`, `FAIL` and `SKIP` lines and a summary, and exits with status 1 if
+anything failed. `test_card.py` also saves screenshots of every page's card, in light and dark
+mode, to `test-pages/local/screens/` for review by eye. The known issues (BBC's inner
+scrolling and start position) can show up as `[live]` failures.
 
 To add a detection case, copy one in `tests/detect-cases.js`: give the text, where it came
 from, and the numbers you expect. Only the fields you list are checked, but every number found
