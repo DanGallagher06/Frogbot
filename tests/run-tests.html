@@ -59,6 +59,10 @@
   <p class="muted"><code>tests/facts-cases.js</code>: the fact records (label, value, role, period, confidence) built from chosen sentences and table rows.</p>
   <div id="facts"></div>
 
+  <h2>Summary</h2>
+  <p class="muted"><code>tests/summary-cases.js</code>: the rules summary, and the number checker run on fake AI summaries (every wrong number must be dropped).</p>
+  <div id="summary"></div>
+
   <h2>Held-out set</h2>
   <p class="muted"><code>tests/holdout-cases.js</code>: written from pages not used in development, never tuned against. This is the honest accuracy number.</p>
   <div id="holdout"></div>
@@ -73,6 +77,8 @@
 <script src="score-cases.js"></script>
 <script src="../content/facts.js"></script>
 <script src="facts-cases.js"></script>
+<script src="../content/summary.js"></script>
+<script src="summary-cases.js"></script>
 <script src="harness.js"></script>
 <script>
   const sets = {
@@ -81,6 +87,25 @@
   };
   const scoring = FrogbotTestHarness.runScoreTests(FrogbotScore, FrogbotScoreCases);
   const factsResults = FrogbotTestHarness.runFactsTests(FrogbotFacts, FrogbotScore, FrogbotFactsCases);
+  const summaryResults = FrogbotTestHarness.runSummaryTests(FrogbotSummary, FrogbotFacts, FrogbotScore, FrogbotSummaryCases);
+
+  function renderSummary(onlyFailures) {
+    const s = summaryResults.summary;
+    const kinds = Object.entries(summaryResults.byKind).map(([k, r]) => `${k} ${r.passed}/${r.total}`).join(" · ");
+    const cards = [
+      ["Accuracy", `${s.accuracy}%`, `${s.passed} of ${s.total} cases pass`],
+      ["By kind", "", kinds],
+      ["Failed", s.failed, `ran in ${s.ms} ms`],
+    ].map(([name, big, sub]) => `<div class="card"><div class="muted">${name}</div><div class="big">${big}</div><div class="muted">${sub}</div></div>`).join("");
+    const rows =
+      `<tr><th>#</th><th>Result</th><th>Kind</th><th>Case</th><th>Result of the run</th></tr>` +
+      summaryResults.results.map((r, i) => (onlyFailures && r.pass) ? "" :
+        `<tr${r.pass ? "" : ' class="fail"'}><td class="num">${i + 1}</td><td>${badge(r.pass)}</td><td><code>${esc(r.kind)}</code></td>
+          <td>${esc(r.text)}${r.pass ? "" : `<ul class="problems">${r.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`}</td>
+          <td>${r.got.map((g) => `<span class="chip">${esc(g)}</span>`).join("<br>") || '<span class="muted">no summary</span>'}</td></tr>`
+      ).join("");
+    return `<section class="cards">${cards}</section><h3>Cases</h3><div class="table-wrap"><table>${rows}</table></div>`;
+  }
 
   function renderFacts(onlyFailures) {
     const s = factsResults.summary;
@@ -173,6 +198,7 @@
     document.getElementById("holdout").innerHTML = renderSet(sets.holdout, onlyFailures);
     document.getElementById("scoring").innerHTML = renderScoring(onlyFailures);
     document.getElementById("facts").innerHTML = renderFacts(onlyFailures);
+    document.getElementById("summary").innerHTML = renderSummary(onlyFailures);
   }
   render();
   document.getElementById("only-failures").addEventListener("change", render);
@@ -192,6 +218,11 @@
     facts: {
       summary: factsResults.summary,
       failures: factsResults.results.filter((r) => !r.pass).map((r) => ({ text: r.text, problems: r.problems, got: r.got })),
+    },
+    summary: {
+      summary: summaryResults.summary,
+      byKind: summaryResults.byKind,
+      failures: summaryResults.results.filter((r) => !r.pass).map((r) => ({ text: r.text, problems: r.problems, got: r.got })),
     },
     scoring: {
       summary: scoring.summary,

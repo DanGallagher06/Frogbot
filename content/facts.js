@@ -882,7 +882,137 @@
     return kept.map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_") && !internal.has(k))));
   }
 
-  const FrogbotFacts = { buildFacts, dominantPeriod };
+  // ---------------------------------------------------------------------------
+  // Card order (shared by the card and the summary)
+  // ---------------------------------------------------------------------------
+
+  const VISIBLE_ROWS = 7;
+  // Importance on the card: headline metrics by topic, then guidance, then segment figures
+  // ("Data Center revenue"), then everything else.
+  const TOPIC_ORDER = ["revenue/sales", "gross profit", "operating income", "net income", "EPS/per share", "margin", "cash flow"];
+  const isSegment = (q) => /^[A-Z]/.test(q) && !/^(?:GAAP|non-GAAP)$/.test(q);
+
+  function cardRank(f) {
+    if (f.role === "guidance") return TOPIC_ORDER.length;
+    const i = TOPIC_ORDER.indexOf(f.topic);
+    if (i < 0) return TOPIC_ORDER.length + 2;
+    return (f.qualifiers || []).some(isSegment) ? TOPIC_ORDER.length + 1 : i;
+  }
+
+  // How recent a period is, for picking a metric's main row: "Q3 2026" > "FY26" > "2025".
+  // A range counts by its last year; a period with no year comes after dated ones.
+  function recency(f) {
+    if (!f.period) return -Infinity;
+    const t = f.period.text.toLowerCase();
+    const years = [...t.matchAll(/\b(?:fy|fiscal(?: year)?)\s*['’]?(\d{4}|\d{2})\b|\b((?:19|20)\d{2})\b/g)].map((m) =>
+      m[1] ? (m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1])) : Number(m[2])
+    );
+    if (!years.length) return -1e9;
+    const q = t.match(/\bq([1-4])\b/) || t.match(/\b(first|second|third|fourth)[\s-]quarter\b/);
+    const quarter = q ? Number(q[1]) || ORDINAL_QUARTER[q[1]] : 0;
+    return Math.max(...years) * 10 + quarter;
+  }
+
+  // The card's rows: one main row per metric (label, which carries its qualifiers, plus
+  // role), by importance, levels before standalone changes, each followed by that metric's
+  // other rows. A standalone change with a level for the same label and period only appears
+  // under "Show all". `primary` marks each metric's main row; `visible` the first 7 of those.
+  // `also`: the rest, apart from changes shown beside their level and earlier table columns.
+  function cardRows(facts) {
+    const position = new Map(facts.map((f, i) => [f, i]));
+    const firstSeen = new Map();
+    facts.forEach((f, i) => {
+      if (!firstSeen.has(f.label)) firstSeen.set(f.label, i);
+    });
+    const shown = facts.filter((x) => x.showOnCard);
+    const periodText = (f) => (f.period ? f.period.text.toLowerCase() : "");
+    const hasLevel = (c) => shown.some((l) => l.role === "level" && l.label === c.label && periodText(l) === periodText(c));
+    const metrics = new Map();
+    const tucked = new Map(); // level metric key -> its standalone changes, "Show all" only
+    for (const f of shown) {
+      if (f.role === "change" && hasLevel(f)) {
+        const key = `${f.label}|level`;
+        if (!tucked.has(key)) tucked.set(key, []);
+        tucked.get(key).push(f);
+        continue;
+      }
+      const key = `${f.label}|${f.role}`;
+      if (!metrics.has(key)) metrics.set(key, []);
+      metrics.get(key).push(f);
+    }
+    const best = (a, b) =>
+      recency(b) - recency(a) ||
+      CONFIDENCE_RANK[b.labelConfidence] - CONFIDENCE_RANK[a.labelConfidence] ||
+      (CONFIDENCE_RANK[b.periodConfidence] || 0) - (CONFIDENCE_RANK[a.periodConfidence] || 0) ||
+      (b.score ?? 0) - (a.score ?? 0) ||
+      position.get(a) - position.get(b);
+    const groups = [...metrics.entries()].map(([key, list]) => {
+      list.sort(best);
+      return Object.assign(list, { extra: (tucked.get(key) || []).sort(best) });
+    });
+    const roleRank = (f) => (f.role === "change" ? 1 : 0);
+    groups.sort(
+      (a, b) =>
+        cardRank(a[0]) - cardRank(b[0]) ||
+        roleRank(a[0]) - roleRank(b[0]) ||
+        firstSeen.get(a[0].label) - firstSeen.get(b[0].label) ||
+        (b[0].score ?? 0) - (a[0].score ?? 0) ||
+        position.get(a[0]) - position.get(b[0])
+    );
+    const rows = [];
+    groups.forEach((list, i) => {
+      list.forEach((f, j) => rows.push({ fact: f, primary: j === 0, visible: j === 0 && i < VISIBLE_ROWS }));
+      for (const f of list.extra) rows.push({ fact: f, primary: false, visible: false });
+    });
+    const also = facts.filter((f) => !f.showOnCard && !f.linkedTo && !f.priorPeriod);
+    return { rows, also };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reading figures in other text (used by the summary's number checker)
+  // ---------------------------------------------------------------------------
+
+  // The finance term starting earliest within [from, to): { label, start, end }.
+  function termAfter(text, from, to) {
+    const slice = text.slice(from, to);
+    let best = null;
+    for (const [label, re] of TERMS) {
+      re.lastIndex = 0;
+      const m = re.exec(slice);
+      if (m && (!best || m.index < best.start - from || (m.index === best.start - from && m[0].length > best.length))) {
+        best = { label, start: from + m.index, end: from + m.index + m[0].length, length: m[0].length };
+      }
+    }
+    return best;
+  }
+
+  const clauseAround = (text, pos) => {
+    const ranges = clauses(text);
+    const i = clauseIndex(ranges, Math.min(Math.max(pos, 0), Math.max(text.length - 1, 0)));
+    return ranges[i] || [0, text.length];
+  };
+
+  // The metric a figure at [start, end) in a sentence is about: the nearest finance term before
+  // it in its clause, else the first one after it ("$482.6 million in revenue"). Returns the
+  // canonical label and its qualifiers ({ label: "Operating income", qualifiers: ["non-GAAP"] })
+  // or null.
+  function metricNear(text, start, end = start) {
+    const [cs, ce] = clauseAround(text, start);
+    const term = termBefore(text, cs, start) || termAfter(text, end, ce);
+    if (!term) return null;
+    return { label: term.label, qualifiers: qualifiersBefore(text, cs, term.start) };
+  }
+
+  // The direction a sentence gives a figure at [start, end) ("rose", "fell", "unchanged"...),
+  // looking no further back than `from` (the previous figure) or ahead than `to`. Null when it
+  // says nothing, or a negation or flip word makes it unclear.
+  function directionNear(text, start, end, from = 0, to = text.length) {
+    const [cs, ce] = clauseAround(text, start);
+    const words = directionFromWords(text.slice(Math.max(cs, from), start), text.slice(end, Math.min(ce, to)));
+    return words.direction || null;
+  }
+
+  const FrogbotFacts = { buildFacts, dominantPeriod, cardRows, metricNear, directionNear };
   if (typeof window !== "undefined" && !window.FrogbotFacts) window.FrogbotFacts = FrogbotFacts;
   if (typeof module !== "undefined" && module.exports) module.exports = FrogbotFacts;
 })();

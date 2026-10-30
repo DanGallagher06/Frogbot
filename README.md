@@ -12,8 +12,10 @@ A frog that hops through financial articles and catches the numbers that matter.
   down the page and flicks its tongue at it.
 - **Delivers a summary card** with the figures it caught, their periods and change arrows
   (green when the move is good for that metric, red when it's bad).
-- **Jumps back to the source**: click any row on the card to scroll to that figure on the page.
-  Copy the table into a spreadsheet, or download it as CSV.
+- **Writes a short summary** of the headline figures on the card, with every number in it
+  linked back to the page.
+- **Jumps back to the source**: click any row on the card, or any number in the summary, to
+  scroll to that figure on the page. Copy the table into a spreadsheet, or download it as CSV.
 
 ![A paragraph with its revenue figure highlighted in gold and its growth rate in blue](docs/highlights.png)
 
@@ -73,7 +75,7 @@ release) in a tab.
 
 ## How it works
 
-Everything runs in the page when you click the button, in six stages:
+Everything runs in the page when you click the button, in seven stages:
 
 1. **Extract** (`content/extract.js`). Finds the article's main content and splits it into
    paragraph, list, table, heading and quote blocks, skipping navigation, captions, related
@@ -96,6 +98,10 @@ Everything runs in the page when you click the button, in six stages:
    metric in order of importance, with the top 7 shown and the rest behind "Show all".
    Figures with a guessed label go under "Also caught". The card lives in a shadow root, so the
    site's styles can't change it.
+7. **Summary** (`content/summary.js`). Two to four short sentences above the table, written
+   from the card's facts in the same order ("Revenue rose 14.2% to $482.6M in Q3 2026."). It
+   only uses the facts' display values, so every number in it comes from the page, and each one
+   is a link back to its figure.
 
 ### Colour key
 
@@ -119,6 +125,7 @@ so it's tested on its own against hand-written cases:
 | Number detection and sentence splitting | `tests/detect-cases.js` | 212 |
 | Scoring and target picking | `tests/score-cases.js` | 87 |
 | Fact records (labels, periods, direction) | `tests/facts-cases.js` | 136 |
+| Summary and number checker | `tests/summary-cases.js` | 51 |
 | Held-out set | `tests/holdout-cases.js` | none yet |
 
 All development cases currently pass. `tools/snapshot_targets.py` also checks that the targets
@@ -179,9 +186,11 @@ Held-out accuracy: to be measured.
 - **Milestone 2: the summary card (done).** Fact records with labels, periods, change direction
   and confidence; the card the frog delivers, with change arrows, "Show all" and "Also caught";
   click a row to jump back to its figure; Copy table and Download CSV.
-- **Milestone 3: AI summary (not started).** A short summary written only from the chosen
+- **Milestone 3: AI summary (in progress).** A short summary written only from the chosen
   sentences, with a check that every number in the summary appears on the page. On-device AI
   where the browser has it, and a rules-only fallback otherwise.
+  - Step 15: the rules summary on the card (numbers linked to their figures, collapsible,
+    Copy summary) and the number checker, tested against fake AI output
 
 ## Project structure
 
@@ -196,6 +205,7 @@ content/score.js     window.FrogbotScore: sentence splitting, number detection, 
                      and target picking (pure functions, no page access)
 content/highlight.js window.FrogbotHighlight: exact figure marks, pulses, whole-block fallback
 content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
+content/summary.js   window.FrogbotSummary: the rules summary and the number checker (pure)
 content/card.js      window.FrogbotCard: the summary card, rendered in a shadow root
 content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
 assets/              The frog artwork and the extension icons (with their SVG sources)
@@ -247,6 +257,7 @@ python tests/browser/run_all.py --skip-live
 | `test_facts_pages.py` | Every fact's figure appears on its page, and none is junk |
 | `test_card.py` | The card's rows and order, dark mode, the bottom sheet, isolation from site CSS |
 | `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV |
+| `test_summary.py` | The summary on each page, its links, Copy summary, the remembered open/closed state |
 
 They use three kinds of page:
 
@@ -260,8 +271,9 @@ They use three kinds of page:
 
 Each suite prints `PASS`, `FAIL` and `SKIP` lines and a summary, and exits with status 1 if
 anything failed. `test_card.py` also saves screenshots of every page's card, in light and dark
-mode, to `test-pages/local/screens/` for review by eye. The known issues (BBC's inner
-scrolling and start position) can show up as `[live]` failures.
+mode, to `test-pages/local/screens/` for review by eye. The known BBC issues (inner scrolling
+and start position) can show up as `[live]` failures; `run_all.py` reports those as "known"
+and doesn't fail the run for them, so it's only red when something new breaks.
 
 To add a detection case, copy one in `tests/detect-cases.js`: give the text, where it came
 from, and the numbers you expect. Only the fields you list are checked, but every number found
@@ -429,6 +441,41 @@ Money displays keep the page's decimal places when the unit matches ("$54.0 bill
   element with inline `!important` styles, so only the card takes clicks and the site's CSS
   can't change it. Releasing the frog again after a run replaces the card; releasing it mid-run
   does nothing.
+
+### The summary and the number checker
+
+The rules summary (`rulesSummary(facts)`) takes the card's main rows in order and writes up to
+three headline sentences, keeping the last slot for guidance when there is any:
+
+- a level with a linked change: "Revenue rose 14.2% to $482.6M in Q3 2026."
+- a level with no direction: "Gross profit was $209.9M in Q3 2026."
+- guidance: "For the fourth quarter of 2026, the company guided revenue of $505M–$525M." (or
+  "Revenue guidance is $54.0B ±2%." with no period)
+- related figures share a sentence when they share a period: GAAP and non-GAAP versions of
+  the same metric, operating income with net income, or two changes.
+
+Periods inferred from the page aren't stated, and neither are spans of years taken from section
+headings ("1984–1991"). With no headline figures on the card, there's no summary.
+
+The number checker (`checkSummary(text, facts, sourceSentences)`) exists for summaries written
+any other way, such as the on-device AI in the next step. Language models can get numbers wrong
+in ways that read perfectly well: a rounded or invented figure, the right figure for the wrong
+metric, a rise described as a fall, or the wrong quarter. So every number in the text must be
+traced before a sentence is shown:
+
+- **Figures** must match a fact (money within 0.5%; per-share amounts, percentages and basis
+  points exactly; ranges by both ends), written any way ("$482.6 million" or "$482.6M", "14.2
+  percent" or "14.2%"), and the metric the sentence attaches to the figure must be the fact's:
+  the same metric, the same segment, and no GAAP / non-GAAP mix-up. A figure no fact holds can
+  instead be found in one of the sentences the summary was written from, about the same metric.
+- **Periods and years** must be on the page, and must fit the period of the figure they're
+  stated with.
+- **Directions** ("rose", "fell", "unchanged") must agree with the fact's.
+
+A sentence with any number that fails is dropped, never corrected, and each kept number links to
+its fact. If more than half the sentences are dropped, or none are left, the summary is rejected,
+so the caller can fall back to the rules summary (the card shows only the rules summary for now). `tests/summary-cases.js` runs the checker on fake
+summaries covering each of these ways to sneak in a wrong number.
 
 ### Editing the frog artwork and icons
 

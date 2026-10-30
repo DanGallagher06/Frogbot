@@ -100,7 +100,7 @@ def test_page_checks():
         ActionChains(d).send_keys(Keys.TAB).perform()
         time.sleep(0.1)
         f2 = d.execute_script(f"const a = {CARD}.activeElement; return a && (a.className || a.tagName)")
-        report("test-page: close button focusable, Tab moves to the next control", f1 == "close" and f2 in ("more", "SUMMARY", "TR", "LI"), f"{f1} -> {f2}")
+        report("test-page: close button focusable, Tab moves to the next control", f1 == "close" and f2 in ("summary-toggle", "more", "SUMMARY", "TR", "LI"), f"{f1} -> {f2}")
         d.save_screenshot(str(SCREENS / "test-page-scrolled-light.png"))
 
         # Escape: everything gone, page HTML byte-identical.

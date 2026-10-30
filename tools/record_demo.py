@@ -27,7 +27,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
 URL = (ROOT / "test-pages" / "earnings-sample.html").as_uri()
 CSS = (ROOT / "content" / "frogbot.css").read_text(encoding="utf-8")
-SCRIPTS = ("frog", "highlight", "extract", "score", "facts", "card", "main")  # popup.js's order
+SCRIPTS = ("frog", "highlight", "extract", "score", "facts", "summary", "card", "main")  # popup.js's order
 JS = "\n".join((ROOT / "content" / f"{name}.js").read_text(encoding="utf-8") for name in SCRIPTS)
 CARD = "document.querySelector('.frogbot-card-host').shadowRoot"
 

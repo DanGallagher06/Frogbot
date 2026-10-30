@@ -30,7 +30,7 @@ from selenium.webdriver.edge.options import Options
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOCAL = ROOT / "test-pages" / "local"
 SCREENS = LOCAL / "screens"  # gitignored, for screenshots worth reviewing by eye
-SCRIPTS = ("frog", "highlight", "extract", "score", "facts", "card", "main")  # popup.js's order
+SCRIPTS = ("frog", "highlight", "extract", "score", "facts", "summary", "card", "main")  # popup.js's order
 CSS = (ROOT / "content" / "frogbot.css").read_text(encoding="utf-8")
 JS = "\n".join((ROOT / "content" / f"{name}.js").read_text(encoding="utf-8") for name in SCRIPTS)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"

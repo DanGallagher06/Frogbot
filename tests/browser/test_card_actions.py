@@ -144,11 +144,16 @@ def test_page_clicks():
         left = d.execute_script("return document.querySelectorAll('.frogbot-pulse, .frogbot-outline').length")
         report("test-page: pulses end and leave no classes behind", left == 0, f"{left} left")
 
-        # Keyboard: Tab from the close button reaches a row; Enter and Space jump.
+        # Keyboard: Tab from the close button reaches a row (after the summary's toggle and
+        # number links); Enter and Space jump.
         d.execute_script(f"{CARD}.querySelector('.close').focus()")
-        ActionChains(d).send_keys(Keys.TAB).perform()
-        time.sleep(0.1)
-        focused = d.execute_script(f"const a = {CARD}.activeElement; return a ? [a.tagName, a.dataset.factId || null] : null")
+        focused = None
+        for _ in range(20):
+            ActionChains(d).send_keys(Keys.TAB).perform()
+            time.sleep(0.05)
+            focused = d.execute_script(f"const a = {CARD}.activeElement; return a ? [a.tagName, a.dataset.factId || null] : null")
+            if focused and focused[0] == "TR":
+                break
         ActionChains(d).send_keys(Keys.ENTER).perform()
         pulsed, exact, _ = check_jump(d, facts[focused[1]]) if focused and focused[1] else ([], False, False)
         report("keyboard: Tab to a row, Enter jumps to its figure", bool(focused) and focused[0] == "TR" and exact, f"{focused}, pulsed {[p['text'] for p in pulsed]}")

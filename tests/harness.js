@@ -313,7 +313,71 @@
     };
   }
 
-  const harness = { runTests, runScoreTests, runFactsTests };
+  // ---- Summary cases (tests/summary-cases.js) ----
+
+  const unitText = (u) => (typeof u === "string" ? u : u.text || u.row.join(" | "));
+
+  function runSummaryTests(summary, facts, score, cases) {
+    const started = Date.now();
+    const build = (c) => facts.buildFacts([{ units: factUnits(score, c.units) }], [], c.context || {});
+    const results = [];
+    for (const c of (cases && cases.rules) || []) {
+      const built = build(c);
+      const got = summary.rulesSummary(built);
+      const texts = got ? got.sentences.map((s) => s.text) : [];
+      const problems = [];
+      if (JSON.stringify(texts) !== JSON.stringify(c.expect)) problems.push(`expected ${JSON.stringify(c.expect)}`);
+      // Every number in a rules summary links to a fact, and the checker keeps every sentence.
+      if (got) {
+        const unlinked = got.sentences.flatMap((s) => s.numbers.filter((n) => !n.factId || !s.text.includes(n.raw)));
+        if (unlinked.length) problems.push(`numbers without a fact: ${JSON.stringify(unlinked)}`);
+        const checked = summary.checkSummary(texts.join(" "), built, c.units.map(unitText));
+        if (checked.droppedCount) problems.push(`the checker dropped: ${JSON.stringify(checked.dropped)}`);
+      }
+      results.push({ kind: "rules", name: c.name, text: c.name, got: texts, problems, pass: problems.length === 0 });
+    }
+    for (const c of (cases && cases.checker) || []) {
+      const built = build(c);
+      const sources = c.sources || c.units.map(unitText);
+      const got = summary.checkSummary(c.summary, built, sources);
+      const all = score.splitSentences(c.summary).map((s) => s.text);
+      const keep = all.map((t) => got.sentences.some((s) => s.text === t));
+      const problems = [];
+      if (JSON.stringify(keep) !== JSON.stringify(c.expect.keep)) problems.push(`keep: expected ${JSON.stringify(c.expect.keep)}, got ${JSON.stringify(keep)}`);
+      if ("rejected" in c.expect && got.rejected !== c.expect.rejected) problems.push(`rejected: expected ${c.expect.rejected}, got ${got.rejected}`);
+      for (const [raw, label] of Object.entries(c.expect.links || {})) {
+        const link = got.sentences.flatMap((s) => s.numbers).find((n) => n.raw === raw);
+        const fact = link && built.find((f) => f.id === link.factId);
+        if (!fact || fact.label !== label) problems.push(`"${raw}" should link to ${label}, got ${fact ? fact.label : link ? "no fact" : "no link"}`);
+      }
+      const summaryLines = [
+        ...got.sentences.map((s) => `kept: ${s.text}`),
+        ...got.dropped.map((d) => `dropped: ${d.text} (${d.reason})`),
+        got.rejected ? "rejected" : "",
+      ].filter(Boolean);
+      results.push({ kind: "checker", name: c.name, text: `${c.name}: ${c.summary}`, got: summaryLines, problems, pass: problems.length === 0 });
+    }
+    const passed = results.filter((r) => r.pass).length;
+    const byKind = {};
+    for (const r of results) {
+      byKind[r.kind] = byKind[r.kind] || { passed: 0, total: 0 };
+      byKind[r.kind].total += 1;
+      if (r.pass) byKind[r.kind].passed += 1;
+    }
+    return {
+      results,
+      byKind,
+      summary: {
+        total: results.length,
+        passed,
+        failed: results.length - passed,
+        accuracy: results.length ? Math.round((passed / results.length) * 1000) / 10 : null,
+        ms: Date.now() - started,
+      },
+    };
+  }
+
+  const harness = { runTests, runScoreTests, runFactsTests, runSummaryTests };
   if (typeof window !== "undefined") window.FrogbotTestHarness = harness;
   if (typeof module !== "undefined" && module.exports) module.exports = harness;
 })();

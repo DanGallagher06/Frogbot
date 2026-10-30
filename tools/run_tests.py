@@ -62,6 +62,8 @@ def main() -> None:
     print()
     failed |= report_facts(results["facts"])
     print()
+    failed |= report_summary(results["summary"])
+    print()
     held_out = results["holdout"]
     if held_out["summary"]["total"] == 0:
         print("Held-out set (tests/holdout-cases.js)")
@@ -88,6 +90,26 @@ def report_facts(results: dict) -> bool:
                 print(f"    {p}")
             for g in f["got"]:
                 print(f"    got: {g}")
+    return bool(results["failures"])
+
+
+def report_summary(results: dict) -> bool:
+    """Print the summary cases' results and failures. Returns True if any failed."""
+    s = results["summary"]
+    title = "Summary (tests/summary-cases.js)"
+    print(title)
+    print("=" * len(title))
+    print(f"Accuracy: {s['accuracy']}%  ({s['passed']} of {s['total']} cases pass, {s['failed']} failed)")
+    print("By kind: " + ", ".join(f"{k} {r['passed']}/{r['total']}" for k, r in results["byKind"].items()))
+    if results["failures"]:
+        print()
+        print("Failures:")
+        for f in results["failures"]:
+            print(f"- {f['text'][:160]}")
+            for p in f["problems"]:
+                print(f"    {p}")
+            for g in f["got"]:
+                print(f"    {g}")
     return bool(results["failures"])
 
 

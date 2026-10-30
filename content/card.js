@@ -4,16 +4,7 @@
 (() => {
   if (window.FrogbotCard) return;
 
-  const VISIBLE_ROWS = 7;
   const DROP_MS = 250;
-  // Importance on the card: headline metrics by topic, then guidance, then segment figures
-  // ("Data Center revenue"), then everything else.
-  const TOPIC_ORDER = ["revenue/sales", "gross profit", "operating income", "net income", "EPS/per share", "margin", "cash flow"];
-  const GUIDANCE_RANK = TOPIC_ORDER.length;
-  const SEGMENT_RANK = TOPIC_ORDER.length + 1;
-  const OTHER_RANK = TOPIC_ORDER.length + 2;
-  const CONFIDENCE = { high: 3, medium: 2, low: 1 };
-  const ORDINAL_QUARTER = { first: 1, second: 2, third: 3, fourth: 4 };
   const ARROW = { up: "▲", down: "▼", flat: "▬" };
   const DIRECTION_WORD = { up: "up", down: "down", flat: "flat" };
   const DOT = { money: "gold", perShare: "gold", percent: "blue", basisPoints: "blue" };
@@ -136,6 +127,45 @@
     }
     .more:hover { background: var(--row-hover); }
     .empty { margin: 14px 14px 10px; color: var(--muted); font-size: 13px; }
+    /* The summary: short bullets above the table, its numbers linked to their figures. */
+    .summary { margin: 4px 14px 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .summary-toggle {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      width: 100%;
+      padding: 4px 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      text-align: left;
+    }
+    .summary-toggle .name { text-transform: uppercase; letter-spacing: 0.03em; }
+    .summary-toggle .kind { font-weight: 500; }
+    .summary-toggle .chev { margin-left: auto; transition: transform 150ms ease-out; }
+    .summary.collapsed .chev { transform: rotate(-90deg); }
+    .summary.collapsed .summary-list { display: none; }
+    .summary-list { margin: 2px 0 2px; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+    .summary-list li { margin: 3px 0; }
+    .num-link {
+      padding: 0;
+      border: 0;
+      background: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: underline dotted var(--grey);
+      text-decoration-thickness: 1.5px;
+      text-underline-offset: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .num-link.gold { text-decoration-color: var(--gold); }
+    .num-link.blue { text-decoration-color: var(--blue); }
+    .num-link:hover { background: var(--row-hover); }
+    .num-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+    @media (prefers-reduced-motion: reduce) { .summary-toggle .chev { transition: none; } }
     details { margin: 8px 14px 0; border-top: 1px solid var(--line); padding-top: 6px; }
     summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; padding: 2px 0; }
     details ul { margin: 4px 0 2px; padding: 0; list-style: none; }
@@ -225,95 +255,20 @@
     return node;
   }
 
-  const isSegment = (q) => /^[A-Z]/.test(q) && !/^(?:GAAP|non-GAAP)$/.test(q);
-  function rank(f) {
-    if (f.role === "guidance") return GUIDANCE_RANK;
-    const i = TOPIC_ORDER.indexOf(f.topic);
-    if (i < 0) return OTHER_RANK;
-    return (f.qualifiers || []).some(isSegment) ? SEGMENT_RANK : i;
-  }
-
-  // How recent a period is, for picking a metric's main row: "Q3 2026" > "FY26" > "2025".
-  // A range counts by its last year; a period with no year comes after dated ones.
-  function recency(f) {
-    if (!f.period) return -Infinity;
-    const t = f.period.text.toLowerCase();
-    const years = [...t.matchAll(/\b(?:fy|fiscal(?: year)?)\s*['’]?(\d{4}|\d{2})\b|\b((?:19|20)\d{2})\b/g)].map((m) =>
-      m[1] ? (m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1])) : Number(m[2])
-    );
-    if (!years.length) return -1e9;
-    const q = t.match(/\bq([1-4])\b/) || t.match(/\b(first|second|third|fourth)[\s-]quarter\b/);
-    const quarter = q ? Number(q[1]) || ORDINAL_QUARTER[q[1]] : 0;
-    return Math.max(...years) * 10 + quarter;
-  }
-
-  // Rows for the main table: one main row per metric (label, which carries its qualifiers,
-  // plus role), by importance, levels before standalone changes, each followed by that
-  // metric's other rows. A standalone change with a level for the same label and period
-  // only appears under "Show all", after that level's metric. Only the first VISIBLE_ROWS
-  // main rows show until "Show all". And the "Also caught" list: the rest, apart from changes
-  // shown beside their level and earlier table columns shown as tooltips.
-  function arrange(facts) {
-    const position = new Map(facts.map((f, i) => [f, i]));
-    const firstSeen = new Map();
-    facts.forEach((f, i) => {
-      if (!firstSeen.has(f.label)) firstSeen.set(f.label, i);
-    });
-    const shown = facts.filter((x) => x.showOnCard);
-    const periodOf = (f) => (f.period ? f.period.text.toLowerCase() : "");
-    const hasLevel = (c) => shown.some((l) => l.role === "level" && l.label === c.label && periodOf(l) === periodOf(c));
-    const metrics = new Map();
-    const tucked = new Map(); // level metric key -> its standalone changes, "Show all" only
-    for (const f of shown) {
-      if (f.role === "change" && hasLevel(f)) {
-        const key = `${f.label}|level`;
-        if (!tucked.has(key)) tucked.set(key, []);
-        tucked.get(key).push(f);
-        continue;
-      }
-      const key = `${f.label}|${f.role}`;
-      if (!metrics.has(key)) metrics.set(key, []);
-      metrics.get(key).push(f);
-    }
-    const best = (a, b) =>
-      recency(b) - recency(a) ||
-      CONFIDENCE[b.labelConfidence] - CONFIDENCE[a.labelConfidence] ||
-      (CONFIDENCE[b.periodConfidence] || 0) - (CONFIDENCE[a.periodConfidence] || 0) ||
-      (b.score ?? 0) - (a.score ?? 0) ||
-      position.get(a) - position.get(b);
-    const groups = [...metrics.entries()].map(([key, list]) => {
-      list.sort(best);
-      return Object.assign(list, { extra: (tucked.get(key) || []).sort(best) });
-    });
-    const roleRank = (f) => (f.role === "change" ? 1 : 0);
-    groups.sort(
-      (a, b) =>
-        rank(a[0]) - rank(b[0]) ||
-        roleRank(a[0]) - roleRank(b[0]) ||
-        firstSeen.get(a[0].label) - firstSeen.get(b[0].label) ||
-        (b[0].score ?? 0) - (a[0].score ?? 0) ||
-        position.get(a[0]) - position.get(b[0])
-    );
-    const rows = [];
-    groups.forEach((list, i) => {
-      list.forEach((f, j) => rows.push({ fact: f, visible: j === 0 && i < VISIBLE_ROWS }));
-      for (const f of list.extra) rows.push({ fact: f, visible: false });
-    });
-    const also = facts.filter((f) => !f.showOnCard && !f.linkedTo && !f.priorPeriod);
-    return { rows, also };
-  }
-
   const metricText = (f) => f.label.replace(/^Guidance:\s*/, "Guidance · ");
 
   // Clicking (or Enter / Space on) a row jumps to its figure on the page. A fact caught in
   // several places goes to its best source first, then cycles through the others, with a
   // "1/2" badge beside the figure.
+  // Where a fact was caught best: the source its own record came from.
+  const bestSource = (f) => Math.max(0, f.sources.findIndex((s) => s.blockIndex === f.blockIndex && s.matchStart === f.matchStart));
+
   function jumpable(node, f, figureEl, onJump) {
     node.tabIndex = 0;
     node.setAttribute("role", "button");
     node.setAttribute("aria-label", `${metricText(f)} ${f.display}: show on the page`);
     const count = f.sources.length;
-    const best = Math.max(0, f.sources.findIndex((s) => s.blockIndex === f.blockIndex && s.matchStart === f.matchStart));
+    const best = bestSource(f);
     let current = -1;
     const go = () => {
       current = current < 0 ? best : (current + 1) % count;
@@ -363,9 +318,75 @@
     return tr;
   }
 
+  // The summary section: a toggle, then one bullet per sentence. Each number linked to a fact is
+  // a button that jumps to its figure. Open by default; open/closed is remembered.
+  const SUMMARY_KIND = { rules: "built from page figures" };
+  const OPEN_KEY = "summaryOpen";
+  function store() {
+    try {
+      return globalThis.chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function summarySection(summary, facts, onJump) {
+    const byId = new Map(facts.map((f) => [f.id, f]));
+    const section = el("section", "summary");
+    const toggle = el("button", "summary-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.append(el("span", "name", "Summary"), el("span", "kind", `· ${SUMMARY_KIND[summary.kind] || summary.kind}`));
+    const chev = el("span", "chev", "▾");
+    chev.setAttribute("aria-hidden", "true");
+    toggle.appendChild(chev);
+    const list = el("ul", "summary-list");
+    for (const sentence of summary.sentences) {
+      const li = el("li");
+      let at = 0;
+      for (const n of sentence.numbers) {
+        const i = sentence.text.indexOf(n.raw, at);
+        const fact = byId.get(n.factId);
+        if (i < 0 || !fact) continue;
+        li.appendChild(document.createTextNode(sentence.text.slice(at, i)));
+        const link = el("button", `num-link ${DOT[fact.type] || "grey"}`, n.raw);
+        link.type = "button";
+        link.dataset.factId = fact.id;
+        link.setAttribute("aria-label", `${n.raw}: show ${metricText(fact)} on the page`);
+        link.addEventListener("click", () => onJump && onJump(fact, bestSource(fact)));
+        li.appendChild(link);
+        at = i + n.raw.length;
+      }
+      li.appendChild(document.createTextNode(sentence.text.slice(at)));
+      list.appendChild(li);
+    }
+    const setOpen = (open) => {
+      section.classList.toggle("collapsed", !open);
+      toggle.setAttribute("aria-expanded", String(open));
+    };
+    toggle.addEventListener("click", () => {
+      const open = section.classList.contains("collapsed");
+      setOpen(open);
+      const s = store();
+      if (s) Promise.resolve(s.set({ [OPEN_KEY]: open })).catch(() => {});
+    });
+    const s = store();
+    if (s) {
+      Promise.resolve(s.get({ [OPEN_KEY]: true }))
+        .then((got) => setOpen(got && got[OPEN_KEY] !== false))
+        .catch(() => {});
+    }
+    section.append(toggle, list);
+    return section;
+  }
+
+  const summaryText = (summary) => summary.sentences.map((s) => s.text).join("\n") + "\n";
+
   function build(facts, options) {
-    const { onClose, onJump } = options;
-    const { rows, also } = arrange(facts);
+    const { onClose, onJump, summary } = options;
+    const hasSummary = Boolean(summary && summary.sentences && summary.sentences.length);
+    // Row order and the "Also caught" list come from facts.js, shared with the summary.
+    const { rows, also } = window.FrogbotFacts.cardRows(facts);
     const root = el("div", "card measuring");
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-label", "Figures Frogbot caught on this page");
@@ -384,6 +405,7 @@
     root.appendChild(head);
 
     const body = el("div", "body");
+    if (hasSummary) body.appendChild(summarySection(summary, facts, onJump));
     if (rows.length) {
       const table = el("table");
       const thead = el("thead");
@@ -454,7 +476,19 @@
     const download = el("button", "action csv", "Download CSV");
     download.type = "button";
     download.addEventListener("click", () => downloadCsv(rows, also, root));
-    actions.append(copy, download);
+    actions.appendChild(copy);
+    if (hasSummary) {
+      const copySummary = el("button", "action copy-summary", "Copy summary");
+      copySummary.type = "button";
+      copySummary.addEventListener("click", async () => {
+        const ok = await copyText(summaryText(summary), root);
+        copySummary.textContent = ok ? "Copied ✓" : "Copy failed";
+        copySummary.focus();
+        setTimeout(() => (copySummary.textContent = "Copy summary"), 1500);
+      });
+      actions.appendChild(copySummary);
+    }
+    actions.appendChild(download);
     foot.appendChild(actions);
     foot.appendChild(el("div", "note", "Figures taken directly from this page · Not financial advice"));
     root.appendChild(foot);
@@ -589,7 +623,8 @@
   window.FrogbotCard = {
     // Renders the card. options.hidden: lay it out invisibly (to measure where the frog
     // should land) until reveal(). options.onClose: the × button. options.onJump(fact,
-    // sourceIndex): a row was clicked.
+    // sourceIndex): a row or a summary number was clicked. options.summary: { kind, sentences }
+    // from summary.js, shown above the table.
     show(facts, options = {}) {
       this.hide();
       host = makeHost();

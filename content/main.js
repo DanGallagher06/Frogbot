@@ -1,5 +1,5 @@
-// Frogbot: entry point, injected after frog.js, highlight.js, extract.js, score.js, facts.js
-// and card.js each time "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
+// Frogbot: entry point, injected after frog.js, highlight.js, extract.js, score.js, facts.js,
+// summary.js and card.js each time "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
 (() => {
   const Frogbot = window.Frogbot;
   const Highlight = window.FrogbotHighlight;
@@ -7,10 +7,11 @@
   const Score = window.FrogbotScore;
   const Facts = window.FrogbotFacts;
   const Card = window.FrogbotCard;
+  const Summary = window.FrogbotSummary;
 
   // One run at a time: releasing again mid-run does nothing. Once a run has finished, its
   // frog, card and highlights make way for the new run.
-  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || !Card) return;
+  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || !Summary || !Card) return;
   if (Frogbot.isShowing()) {
     if (window.__frogbotRunning) return;
     Frogbot.remove();
@@ -392,7 +393,10 @@
   // drops the card from its mouth. Both stay put while the page scrolls.
   async function deliverCard() {
     if (cancelled) return;
-    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo });
+    // A short written summary from the card's facts (none when the card has no headline figures).
+    const summary = Summary.rulesSummary(facts);
+    if (debug && summary) console.log("Frogbot: summary\n" + Summary.plainText(summary));
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary });
     const rect = Card.rect();
     const perch = {
       x: Math.max(rect.left + CARD_PERCH.dx, FROG_SIZE / 2 + 4),
