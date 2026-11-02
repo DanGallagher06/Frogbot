@@ -96,6 +96,12 @@
   const TOLERANCE_BEFORE = /(?:plus or minus|\+\/-|\+\/−|±)\s*$/i;
   const ESTIMATE_NOUN = String.raw`(?:consensus|estimates?|expectations?|forecasts?|analysts?|the Street|Wall Street)`;
   const ABOVE_ESTIMATE = new RegExp(String.raw`\b(?:beat|beats|beating)\b|\b(?:above|ahead of|topped|exceeded|surpassed)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
+  // A surprise against estimates, written right after the figure: "5.9% above estimates",
+  // "$0.12 short of consensus". The figure is the size of the beat or miss, not the metric.
+  const SURPRISE_AFTER = new RegExp(
+    String.raw`^\s*(above|ahead of|better than|below|short of|behind|worse than)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`,
+    "i"
+  );
   const BELOW_ESTIMATE = new RegExp(String.raw`\b(?:missed|misses|missing)\b|\b(?:below|short of|behind)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
   // Sentiment: which way is good, for canonical metrics only.
   const UP_IS_GOOD = new Set([
@@ -389,8 +395,12 @@
       }
 
       // Role.
+      const surprise = !isGuidance && (n.type === "percent" || n.type === "money" || n.type === "perShare") ? after.match(SURPRISE_AFTER) : null;
       if (isGuidance) f.role = "guidance";
-      else if (ESTIMATE_SUBJECT.test(before) || ESTIMATE_DIRECT.test(before) || ESTIMATE_AFTER.test(after)) f.role = "estimate";
+      else if (surprise) {
+        f.role = "estimate";
+        f.vsEstimate = /^(?:above|ahead|better)/i.test(surprise[1]) ? "above" : "below";
+      } else if (ESTIMATE_SUBJECT.test(before) || ESTIMATE_DIRECT.test(before) || ESTIMATE_AFTER.test(after)) f.role = "estimate";
       else if (isChange(n, before, after)) f.role = "change";
 
       // Label text.
@@ -410,6 +420,7 @@
       }
       if (f.role === "guidance") f.label = `Guidance: ${f.label}`;
       if (f.role === "guidance") f.topic = "guidance/outlook/forecast";
+      if (surprise && base) f.label = `${f.label} vs estimates`;
       f.qualifiers = qualifiers;
       f.perShare = n.type === "perShare" || (base && PER_SHARE_LABELS.has(base) && Math.abs(n.value) < 1000);
 

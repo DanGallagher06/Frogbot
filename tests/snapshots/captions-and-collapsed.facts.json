@@ -100,15 +100,15 @@
     "sources": 1
   },
   {
-    "label": "Revenue",
+    "label": "Revenue vs estimates",
     "display": "5.9%",
-    "role": "level",
+    "role": "estimate",
     "period": "third-quarter",
     "periodSource": "page",
     "labelConfidence": "high",
     "periodConfidence": "low",
     "confidence": "low",
-    "showOnCard": true,
+    "showOnCard": false,
     "periodInferred": true,
     "direction": null,
     "directionSource": null,

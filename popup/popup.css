@@ -49,6 +49,13 @@ button:disabled {
   cursor: pointer;
 }
 
+.note {
+  margin: 4px 0 0 24px;
+  color: #6f7d6d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .option input {
   margin: 0;
   accent-color: #3f9b3a;

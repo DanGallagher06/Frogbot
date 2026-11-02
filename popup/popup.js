@@ -1,5 +1,7 @@
 const releaseButton = document.getElementById("release");
 const debugCheckbox = document.getElementById("debug");
+const aiSwitch = document.getElementById("use-ai");
+const aiNote = document.getElementById("ai-note");
 const message = document.getElementById("message");
 
 function showMessage(text) {
@@ -15,6 +17,35 @@ debugCheckbox.addEventListener("change", () => {
   chrome.storage.local.set({ debug: debugCheckbox.checked });
 });
 
+// "Use on-device AI": on by default. Being on never downloads anything by itself; the model is
+// only downloaded when the user clicks the button on the card.
+chrome.storage.local.get({ useAI: true }).then(({ useAI }) => {
+  aiSwitch.checked = useAI;
+});
+aiSwitch.addEventListener("change", () => {
+  chrome.storage.local.set({ useAI: aiSwitch.checked });
+});
+
+// Say so when this computer can't run the on-device model (no Summarizer API, or the browser
+// reports it unavailable), so the switch doesn't promise something it can't do.
+(async () => {
+  let state = "unavailable";
+  try {
+    if ("Summarizer" in self) {
+      state = await Summarizer.availability({
+        type: "key-points",
+        format: "plain-text",
+        length: "short",
+        expectedInputLanguages: ["en"],
+        outputLanguage: "en",
+      });
+    }
+  } catch {
+    state = "unavailable";
+  }
+  aiNote.hidden = state !== "unavailable";
+})();
+
 releaseButton.addEventListener("click", async () => {
   releaseButton.disabled = true;
 
@@ -28,10 +59,11 @@ releaseButton.addEventListener("click", async () => {
     // Same (isolated) world as the content scripts, so main.js can read the flag.
     await chrome.scripting.executeScript({
       target,
-      func: (debug) => {
+      func: (debug, useAI) => {
         window.__frogbotDebug = debug;
+        window.__frogbotUseAI = useAI;
       },
-      args: [debugCheckbox.checked],
+      args: [debugCheckbox.checked, aiSwitch.checked],
     });
     await chrome.scripting.insertCSS({ target, files: ["content/frogbot.css"] });
     await chrome.scripting.executeScript({
@@ -43,6 +75,7 @@ releaseButton.addEventListener("click", async () => {
         "content/score.js",
         "content/facts.js",
         "content/summary.js",
+        "content/ai-summary.js",
         "content/card.js",
         "content/main.js",
       ],

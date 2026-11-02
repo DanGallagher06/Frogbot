@@ -671,8 +671,25 @@
       expect: [{ label: "Revenue", vsEstimate: "below", sentiment: "bad" }],
     },
     {
+      // A surprise against estimates is an estimate, not the level of revenue.
       units: ["Revenue came in 5.9% above estimates."],
-      expect: [{ label: "Revenue", vsEstimate: "above", sentiment: "good", direction: null }],
+      expect: [{ label: "Revenue vs estimates", role: "estimate", vsEstimate: "above", sentiment: "good", direction: null, showOnCard: false }],
+    },
+    {
+      units: ["Revenue for the companies that have reported is 5.9% above estimates, and the blended revenue growth rate stands at 6.4%."],
+      expect: [
+        { label: "Revenue vs estimates", display: "5.9%", role: "estimate", vsEstimate: "above", showOnCard: false },
+        { label: "Revenue", display: "6.4%", showOnCard: true },
+      ],
+    },
+    {
+      units: ["Diluted EPS came in $0.12 short of consensus."],
+      expect: [{ label: "Diluted EPS vs estimates", display: "$0.12", role: "estimate", vsEstimate: "below", sentiment: "bad" }],
+    },
+    {
+      // A level that beat estimates stays a level.
+      units: ["EPS of $1.85 beat consensus estimates."],
+      expect: [{ label: "EPS", role: "level", vsEstimate: "above" }],
     },
     {
       // Costs below consensus are good.

@@ -74,6 +74,13 @@
       units: [{ text: "Its gross margin was 55%.", heading: "1984–1991: Macintosh and new ventures" }],
       expect: ["Gross margin was 55%."],
     },
+    { name: "a surprise against estimates isn't stated as the metric", units: ["Revenue came in 5.9% above estimates."], expect: [] },
+    {
+      name: "a surprise beside a real figure",
+      units: ["Revenue for the companies that have reported is 5.9% above estimates, and the blended revenue growth rate stands at 6.4%."],
+      expect: ["Revenue rose 6.4%."],
+    },
+    { name: "a growth rate with no direction isn't stated as a level", units: ["Revenue was 6.4% in Q3 2026, according to the report."], expect: [] },
     { name: "no card facts, no summary", units: ["According to FactSet, 83% of S&P 500 companies have reported results."], expect: [] },
     {
       name: "at most four sentences, guidance kept",

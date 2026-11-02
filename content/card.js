@@ -75,13 +75,17 @@
     }
     .close:hover { background: var(--accent-dark); }
     .close:focus-visible { outline-color: #ffffff; outline-offset: -2px; }
-    .body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0 6px; }
+    .body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 6px; }
     table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    /* The header stays put while the rows scroll under it: solid card background (also painted
+       a little above it, so nothing shows through), above the rows, with a line under it. */
     th {
       position: sticky;
       top: 0;
+      z-index: 1;
       padding: 6px 8px 4px;
       background: var(--bg);
+      box-shadow: 0 -8px 0 var(--bg), inset 0 -1px 0 var(--line);
       color: var(--muted);
       font-size: 11px;
       font-weight: 600;
@@ -165,6 +169,25 @@
     .num-link.blue { text-decoration-color: var(--blue); }
     .num-link:hover { background: var(--row-hover); }
     .num-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+    .summary.collapsed .ai-status { display: none; }
+    .ai-note { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .ai-writing::before { content: "✎ "; }
+    .ai-dropped { cursor: help; }
+    .ai-get {
+      margin: 6px 0 2px;
+      padding: 3px 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent-dark);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .ai-get:hover { background: var(--row-hover); }
+    .ai-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .ai-progress { height: 3px; margin: 6px 0 0; overflow: hidden; border-radius: 2px; background: var(--line); }
+    .ai-progress-fill { height: 100%; background: var(--accent); transition: width 200ms linear; }
+    @media (prefers-reduced-motion: reduce) { .ai-progress-fill { transition: none; } }
     @media (prefers-reduced-motion: reduce) { .summary-toggle .chev { transition: none; } }
     details { margin: 8px 14px 0; border-top: 1px solid var(--line); padding-top: 6px; }
     summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; padding: 2px 0; }
@@ -318,9 +341,10 @@
     return tr;
   }
 
-  // The summary section: a toggle, then one bullet per sentence. Each number linked to a fact is
-  // a button that jumps to its figure. Open by default; open/closed is remembered.
-  const SUMMARY_KIND = { rules: "built from page figures" };
+  // The summary section: a toggle, one bullet per sentence, and a status line for the AI summary
+  // (writing, the download button, download progress, removed sentences). Each number linked to a
+  // fact is a button that jumps to its figure. Open by default; open/closed is remembered.
+  const SUMMARY_KIND = { rules: "Summary · built from page figures", ai: "AI summary · every number checked" };
   const OPEN_KEY = "summaryOpen";
   function store() {
     try {
@@ -330,17 +354,15 @@
     }
   }
 
-  function summarySection(summary, facts, onJump) {
-    const byId = new Map(facts.map((f) => [f.id, f]));
-    const section = el("section", "summary");
-    const toggle = el("button", "summary-toggle");
-    toggle.type = "button";
-    toggle.setAttribute("aria-expanded", "true");
-    toggle.append(el("span", "name", "Summary"), el("span", "kind", `· ${SUMMARY_KIND[summary.kind] || summary.kind}`));
-    const chev = el("span", "chev", "▾");
-    chev.setAttribute("aria-hidden", "true");
-    toggle.appendChild(chev);
-    const list = el("ul", "summary-list");
+  let summaryView = null; // { section, kind, list, status, facts, onJump, onGetAI, summary }
+
+  function fillSummary(view, summary) {
+    const byId = new Map(view.facts.map((f) => [f.id, f]));
+    view.summary = summary;
+    const [name, ...rest] = SUMMARY_KIND[summary.kind].split(" · ");
+    view.name.textContent = name;
+    view.kind.textContent = `· ${rest.join(" · ")}`;
+    view.list.replaceChildren();
     for (const sentence of summary.sentences) {
       const li = el("li");
       let at = 0;
@@ -353,13 +375,66 @@
         link.type = "button";
         link.dataset.factId = fact.id;
         link.setAttribute("aria-label", `${n.raw}: show ${metricText(fact)} on the page`);
-        link.addEventListener("click", () => onJump && onJump(fact, bestSource(fact)));
+        link.addEventListener("click", () => view.onJump && view.onJump(fact, bestSource(fact)));
         li.appendChild(link);
         at = i + n.raw.length;
       }
       li.appendChild(document.createTextNode(sentence.text.slice(at)));
-      list.appendChild(li);
+      view.list.appendChild(li);
     }
+  }
+
+  // The status line under the summary, for the AI summary's progress: { phase, progress }.
+  // phase: "writing", "downloadable" (the download button), "downloading", or anything else for
+  // nothing. An accepted AI summary also notes how many sentences the checker removed.
+  function fillStatus(view, ai) {
+    const status = view.status;
+    status.replaceChildren();
+    const dropped = view.summary && view.summary.kind === "ai" ? view.summary.dropped || [] : [];
+    if (dropped.length) {
+      const note = el("p", "ai-note ai-dropped", `${dropped.length} sentence${dropped.length === 1 ? "" : "s"} removed (figure not on the page)`);
+      note.title = dropped.map((d) => d.text).join("\n");
+      status.appendChild(note);
+    }
+    if (!ai) return;
+    if (ai.phase === "writing") {
+      status.appendChild(el("p", "ai-note ai-writing", "Writing AI summary…"));
+    } else if (ai.phase === "downloadable") {
+      const get = el("button", "ai-get", "Get AI summaries (one-time download)");
+      get.type = "button";
+      // This click is the user activation the browser needs before it downloads the model.
+      get.addEventListener("click", () => view.onGetAI && view.onGetAI());
+      status.appendChild(get);
+    } else if (ai.phase === "downloading") {
+      const percent = Math.round((ai.progress || 0) * 100);
+      const bar = el("div", "ai-progress");
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-label", "Downloading the on-device model");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      bar.setAttribute("aria-valuenow", String(percent));
+      const fill = el("div", "ai-progress-fill");
+      fill.style.width = `${percent}%`;
+      bar.appendChild(fill);
+      status.append(bar, el("p", "ai-note ai-downloading", `Downloading the on-device model… ${percent}%`));
+    }
+  }
+
+  function summarySection(summary, facts, options) {
+    const section = el("section", "summary");
+    const toggle = el("button", "summary-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "true");
+    const name = el("span", "name");
+    const kind = el("span", "kind");
+    const chev = el("span", "chev", "▾");
+    chev.setAttribute("aria-hidden", "true");
+    toggle.append(name, kind, chev);
+    const list = el("ul", "summary-list");
+    const status = el("div", "ai-status");
+    const view = { section, name, kind, list, status, facts, onJump: options.onJump, onGetAI: options.onGetAI, summary: null };
+    fillSummary(view, summary);
+    fillStatus(view, options.ai);
     const setOpen = (open) => {
       section.classList.toggle("collapsed", !open);
       toggle.setAttribute("aria-expanded", String(open));
@@ -376,11 +451,12 @@
         .then((got) => setOpen(got && got[OPEN_KEY] !== false))
         .catch(() => {});
     }
-    section.append(toggle, list);
+    section.append(toggle, list, status);
+    summaryView = view;
     return section;
   }
 
-  const summaryText = (summary) => summary.sentences.map((s) => s.text).join("\n") + "\n";
+  const summaryText = (summary) => summary.sentences.map((x) => x.text).join("\n") + "\n";
 
   function build(facts, options) {
     const { onClose, onJump, summary } = options;
@@ -405,7 +481,7 @@
     root.appendChild(head);
 
     const body = el("div", "body");
-    if (hasSummary) body.appendChild(summarySection(summary, facts, onJump));
+    if (hasSummary) body.appendChild(summarySection(summary, facts, options));
     if (rows.length) {
       const table = el("table");
       const thead = el("thead");
@@ -452,7 +528,8 @@
       for (const f of also) {
         const li = el("li");
         li.dataset.factId = f.id;
-        const label = f.labelConfidence === "low" ? `“${f.label}”` : `${metricText(f)}${f.role === "estimate" ? " (estimate)" : ""}`;
+        const estimate = f.role === "estimate" && !/ vs estimates$/.test(f.label) ? " (estimate)" : "";
+        const label = f.labelConfidence === "low" ? `“${f.label}”` : `${metricText(f)}${estimate}`;
         li.appendChild(el("span", "label", label));
         const fig = li.appendChild(el("span", "fig", f.display));
         jumpable(li, f, fig, onJump);
@@ -481,7 +558,8 @@
       const copySummary = el("button", "action copy-summary", "Copy summary");
       copySummary.type = "button";
       copySummary.addEventListener("click", async () => {
-        const ok = await copyText(summaryText(summary), root);
+        // Whichever summary is showing: the AI one once it's accepted, else the rules one.
+        const ok = await copyText(summaryText((summaryView && summaryView.summary) || summary), root);
         copySummary.textContent = ok ? "Copied ✓" : "Copy failed";
         copySummary.focus();
         setTimeout(() => (copySummary.textContent = "Copy summary"), 1500);
@@ -624,7 +702,8 @@
     // Renders the card. options.hidden: lay it out invisibly (to measure where the frog
     // should land) until reveal(). options.onClose: the × button. options.onJump(fact,
     // sourceIndex): a row or a summary number was clicked. options.summary: { kind, sentences }
-    // from summary.js, shown above the table.
+    // from summary.js, shown above the table. options.ai: the AI summary's progress ({ phase,
+    // progress }), and options.onGetAI(): the download button was clicked.
     show(facts, options = {}) {
       this.hide();
       host = makeHost();
@@ -667,11 +746,20 @@
       }
     },
 
+    // The AI summary's progress changed: { phase, progress, summary }. An accepted AI summary
+    // (phase "done") replaces the rules summary.
+    updateAI(ai) {
+      if (!summaryView || !card || !summaryView.section.isConnected) return;
+      if (ai.phase === "done" && ai.summary && ai.summary.sentences.length) fillSummary(summaryView, ai.summary);
+      fillStatus(summaryView, ai);
+    },
+
     isShowing() {
       return Boolean(host && host.isConnected);
     },
 
     hide() {
+      summaryView = null;
       if (host) host.remove();
       host = null;
       card = null;

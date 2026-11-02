@@ -116,10 +116,15 @@
   // (inferred) period is left out rather than stated as fact, and so is a span of years (a
   // section heading's "1984–1991" isn't the figure's reporting period).
   const SPAN_OF_YEARS = /\b(?:19|20)\d{2}\s*[–—-]\s*(?:(?:19|20)\d{2}|present)\b/i;
+  // Metrics that are themselves percentages ("Gross margin was 42%"). For anything else a
+  // percentage is a growth rate: "revenue growth of 6.4%" is a rise, never "revenue was 6.4%".
+  const RATIO = /margin|rate|yield|ratio|share/i;
   function item(fact) {
     const stated = fact.period && !fact.periodInferred && !SPAN_OF_YEARS.test(fact.period.text);
     const period = stated ? periodPhrase(fact.period.text) : null;
     if (fact.role === "guidance") return { kind: "guidance", fact, period };
+    const growthRate = fact.role === "level" && (fact.type === "percent" || fact.type === "basisPoints") && !RATIO.test(metricText(fact.label));
+    if (growthRate) return VERB[fact.direction] ? { kind: "change", fact, period } : null;
     if (fact.role === "level") return { kind: "level", fact, period };
     if (fact.role === "change" && VERB[fact.direction]) return { kind: "change", fact, period };
     return null;

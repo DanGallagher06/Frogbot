@@ -1,5 +1,5 @@
 // Frogbot: entry point, injected after frog.js, highlight.js, extract.js, score.js, facts.js,
-// summary.js and card.js each time "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
+// summary.js, ai-summary.js and card.js each time "Release the frog" is clicked. The popup sets window.__frogbotDebug first.
 (() => {
   const Frogbot = window.Frogbot;
   const Highlight = window.FrogbotHighlight;
@@ -8,10 +8,11 @@
   const Facts = window.FrogbotFacts;
   const Card = window.FrogbotCard;
   const Summary = window.FrogbotSummary;
+  const AI = window.FrogbotAI;
 
   // One run at a time: releasing again mid-run does nothing. Once a run has finished, its
   // frog, card and highlights make way for the new run.
-  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || !Summary || !Card) return;
+  if (!Frogbot || !Highlight || !Extract || !Score || !Facts || !Summary || !AI || !Card) return;
   if (Frogbot.isShowing()) {
     if (window.__frogbotRunning) return;
     Frogbot.remove();
@@ -391,22 +392,79 @@
 
   // The frog hops to the bottom-right corner, perches on the card's top-left corner and
   // drops the card from its mouth. Both stay put while the page scrolls.
-  async function deliverCard() {
-    if (cancelled) return;
-    // A short written summary from the card's facts (none when the card has no headline figures).
-    const summary = Summary.rulesSummary(facts);
-    if (debug && summary) console.log("Frogbot: summary\n" + Summary.plainText(summary));
-    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary });
-    const rect = Card.rect();
-    const perch = {
+  function perchOn(rect) {
+    return {
       x: Math.max(rect.left + CARD_PERCH.dx, FROG_SIZE / 2 + 4),
       y: Math.max(rect.top + CARD_PERCH.dy, FROG_SIZE / 2 + 4),
     };
+  }
+
+  async function deliverCard() {
+    if (cancelled) return;
+    if (debug && rulesSummary) console.log("Frogbot: summary\n" + Summary.plainText(rulesSummary));
+    // The rules summary first; the AI summary replaces it if (and when) it passes the checker.
+    const summary = ai.phase === "done" && ai.summary ? ai.summary : rulesSummary;
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary, ai: { ...ai }, onGetAI: getAI });
+    const perch = perchOn(Card.rect());
     await Frogbot.hopToFixed(perch);
     if (cancelled) return;
     await Frogbot.faceTowards(perch.x, perch.y + FROG_SIZE); // face down onto the card
     if (cancelled) return;
     await Card.reveal({ origin: Frogbot.mouthPosition(), animate: !reducedMotion() });
+    perched = true;
+  }
+
+  // ---- The on-device AI summary ----
+
+  // Its progress, shown on the card: phase "none", "writing", "downloadable", "downloading" or
+  // "done" (with the accepted summary).
+  const ai = { phase: "none", progress: 0, summary: null };
+  const aiAbort = new AbortController();
+  let perched = false;
+
+  function setAI(update) {
+    Object.assign(ai, update);
+    if (cancelled || !Card.isShowing()) return;
+    Card.updateAI({ ...ai });
+    // The card grows or shrinks from the bottom; keep the frog on its corner.
+    if (perched) Frogbot.placeAt(perchOn(Card.rect()));
+  }
+
+  // Starts as soon as the targets are picked, so the summary is usually ready when the card drops.
+  async function startAI() {
+    if (!rulesSummary) return; // nothing on the card to summarise
+    const state = await AI.availability();
+    if (debug) console.log(`Frogbot: on-device AI is ${state}`);
+    if (cancelled) return;
+    if (state === "available") writeAI(false);
+    else if (state === "downloadable") setAI({ phase: "downloadable" });
+    else if (state === "downloading") writeAI(true);
+  }
+
+  // The card's "Get AI summaries" button. Runs inside the click, which is the user activation
+  // the browser needs to download the model.
+  function getAI() {
+    if (ai.phase !== "downloadable") return;
+    writeAI(true);
+  }
+
+  function writeAI(download) {
+    setAI({ phase: download ? "downloading" : "writing", progress: 0 });
+    AI.generate({
+      sources,
+      facts,
+      signal: aiAbort.signal,
+      onProgress: download ? (fraction) => setAI({ phase: fraction < 1 ? "downloading" : "writing", progress: fraction }) : undefined,
+    }).then((result) => {
+      if (cancelled) return;
+      if (result.status === "accepted") {
+        if (debug) console.log("Frogbot: AI summary accepted\n" + Summary.plainText(result.summary), result.checked.dropped);
+        setAI({ phase: "done", summary: result.summary });
+      } else {
+        if (debug) console.log(`Frogbot: AI summary not used (${result.status}${result.reason ? `: ${result.reason}` : ""})`, result.checked || "");
+        setAI({ phase: "none" });
+      }
+    });
   }
 
   // A row on the card was clicked: scroll one of the fact's sources to the middle of the
@@ -466,6 +524,12 @@
   const targets = fixedTargets() || scoring.targets;
   // One record per caught figure, the data behind the stat card (milestone 2).
   const facts = Facts.buildFacts(targets, blocks);
+  // The rules summary, and the sentences and rows the AI summary is written from (page order).
+  const rulesSummary = Summary.rulesSummary(facts);
+  const sources = targets
+    .flatMap((t) => t.units)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((u) => u.text);
 
   Frogbot.show(startPosition(container, blocks));
   if (debug) showDebug(container, blocks, extractMs, scoring);
@@ -478,7 +542,12 @@
     window.__frogbotRunning = false;
     document.removeEventListener("keydown", onKeyDown, true);
     Highlight.clearAll();
+    aiAbort.abort(); // stops the AI summary; its summarizer is destroyed either way
     Card.hide();
+  });
+
+  startAI().catch((error) => {
+    if (debug) console.log("Frogbot: AI summary not used", error);
   });
 
   run(targets).catch((error) => {

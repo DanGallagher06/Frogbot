@@ -1,18 +1,22 @@
 """Run every browser suite in tests/browser/ and summarise.
 
-    python tests/browser/run_all.py [--skip-live]
+    python tests/browser/run_all.py [--skip-live] [--timeout-minutes 20] [--only test_card.py,test_summary.py]
 
 Each suite runs in its own process (so one crash can't stop the rest) and its output is shown
-as it goes. Failures listed in KNOWN_ISSUES (the known BBC issues in the README) are expected:
+as it goes. A suite that runs past its time limit (20 minutes by default; --timeout-minutes or
+FROGBOT_SUITE_TIMEOUT to change it) is stopped, browser and all, counts as a failure, and the
+run moves on. Failures listed in KNOWN_ISSUES (the known BBC issues in the README) are expected:
 they're reported separately as "known" and don't fail the run, so the run is only red when
 something new breaks. Needs Selenium; see tests/browser/common.py for the kinds of page and the
 options.
 """
 
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import threading
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -26,6 +30,7 @@ SUITES = [
     "test_card.py",
     "test_card_actions.py",
     "test_summary.py",
+    "test_ai_summary.py",
 ]
 # Known issues (see "Known issues" in the README): BBC can switch to scrolling the article inside
 # a box after the frog appears, so these checks fail on some runs.
@@ -35,17 +40,43 @@ KNOWN_ISSUES = [
 ]
 
 
+def option(name, default=None):
+    """The value after --name, or --name=value, on the command line."""
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg == f"--{name}" and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if arg.startswith(f"--{name}="):
+            return arg.split("=", 1)[1]
+    return default
+
+
+def stop(proc):
+    """Stop a suite and the browsers it started."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        proc.kill()
+
+
 def main():
-    args = [a for a in sys.argv[1:] if a.startswith("--")]
+    limit = float(option("timeout-minutes", os.environ.get("FROGBOT_SUITE_TIMEOUT", "20"))) * 60
+    only = option("only")
+    suites = [s.strip() for s in only.split(",")] if only else SUITES
+    args = [a for a in sys.argv[1:] if a in ("--skip-live",)]
     summary = []
     known_seen = []
-    for suite in SUITES:
+    for suite in suites:
         print(f"\n===== {suite} =====", flush=True)
         started = time.time()
         proc = subprocess.Popen(
             [sys.executable, str(HERE / suite), *args],
             cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         )
+        timed_out = threading.Event()
+
+        timer = threading.Timer(limit, lambda: (timed_out.set(), stop(proc)))
+        timer.daemon = True
+        timer.start()
         counts, known = None, 0
         for line in proc.stdout:
             if line.startswith("FAIL ") and any(k.search(line) for k in KNOWN_ISSUES):
@@ -60,11 +91,19 @@ def main():
             if m:
                 counts = tuple(int(x) for x in m.groups())
         proc.wait()
-        summary.append((suite, counts, known, proc.returncode, time.time() - started))
+        timer.cancel()
+        if timed_out.is_set():
+            print(f"FAIL {suite}: stopped after the {limit / 60:g}-minute time limit", flush=True)
+        summary.append((suite, counts, known, proc.returncode, time.time() - started, timed_out.is_set()))
 
     print("\n===== Summary =====")
     failed = False
-    for suite, counts, known, code, seconds in summary:
+    for suite, counts, known, code, seconds, timed_out in summary:
+        if timed_out:
+            failed = True
+            done = f", {counts[0]} passed before that" if counts else ""
+            print(f"{suite:<24} timed out after {limit / 60:g} minutes{done}")
+            continue
         if counts is None:
             failed = True
             print(f"{suite:<24} did not finish (exit {code})")

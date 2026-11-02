@@ -13,7 +13,8 @@ A frog that hops through financial articles and catches the numbers that matter.
 - **Delivers a summary card** with the figures it caught, their periods and change arrows
   (green when the move is good for that metric, red when it's bad).
 - **Writes a short summary** of the headline figures on the card, with every number in it
-  linked back to the page.
+  linked back to the page. Where the browser has an on-device AI model it writes the summary
+  with that, and every number the model uses is checked against the page first.
 - **Jumps back to the source**: click any row on the card, or any number in the summary, to
   scroll to that figure on the page. Copy the table into a spreadsheet, or download it as CSV.
 
@@ -36,8 +37,14 @@ lighter italics, and an unclear direction gets no arrow.
 ## Privacy
 
 Frogbot runs entirely in your browser, and only on the tab where you click it. It has no
-background script, makes no network requests, and sends no data anywhere. Downloaded CSV files
-are saved straight to your computer.
+background script, makes no network requests of its own, and sends no data anywhere. Downloaded
+CSV files are saved straight to your computer.
+
+The AI summary uses the model built into Edge and Chrome (the Summarizer API), which runs on
+your own computer: the article never leaves it, and there are no accounts or API keys. The model
+itself is a one-time download by the browser, which only starts when you click "Get AI summaries
+(one-time download)" on the card. You can turn the AI summary off in the popup ("Use on-device
+AI"); then Frogbot makes no AI calls at all and uses its built-in summary.
 
 It asks for three permissions:
 
@@ -45,7 +52,7 @@ It asks for three permissions:
 | --- | --- |
 | `activeTab` | Access to the current tab only, and only after you click the extension. |
 | `scripting` | To add the frog, the highlights and the card to that tab. |
-| `storage` | To remember one setting locally: whether the debug view is on. |
+| `storage` | To remember your settings locally: the debug view, the AI summary switch, and whether the summary is open. |
 
 ## Install
 
@@ -98,9 +105,12 @@ Everything runs in the page when you click the button, in seven stages:
    metric in order of importance, with the top 7 shown and the rest behind "Show all".
    Figures with a guessed label go under "Also caught". The card lives in a shadow root, so the
    site's styles can't change it.
-7. **Summary** (`content/summary.js`). Two to four short sentences above the table, written
-   from the card's facts in the same order ("Revenue rose 14.2% to $482.6M in Q3 2026."). It
-   only uses the facts' display values, so every number in it comes from the page, and each one
+7. **Summary** (`content/summary.js`, `content/ai-summary.js`). Two to four short sentences
+   above the table. The built-in summary is written from the card's facts in the same order
+   ("Revenue rose 14.2% to $482.6M in Q3 2026.") using only their display values, so every number
+   in it comes from the page. Where the browser has an on-device AI model, it writes a summary
+   from the chosen sentences and rows while the frog is still hopping; that summary is only
+   shown if every number in it checks out against the page (see below). Either way, each number
    is a link back to its figure.
 
 ### Colour key
@@ -124,8 +134,8 @@ so it's tested on its own against hand-written cases:
 | --- | --- | --- |
 | Number detection and sentence splitting | `tests/detect-cases.js` | 212 |
 | Scoring and target picking | `tests/score-cases.js` | 87 |
-| Fact records (labels, periods, direction) | `tests/facts-cases.js` | 136 |
-| Summary and number checker | `tests/summary-cases.js` | 51 |
+| Fact records (labels, periods, direction) | `tests/facts-cases.js` | 139 |
+| Summary and number checker | `tests/summary-cases.js` | 54 |
 | Held-out set | `tests/holdout-cases.js` | none yet |
 
 All development cases currently pass. `tools/snapshot_targets.py` also checks that the targets
@@ -144,6 +154,12 @@ There are two kinds of test case, reported separately:
 Held-out accuracy: to be measured.
 
 ## Known issues
+
+- **The AI summary has only been tested with a stand-in model so far.** The on-device model isn't
+  available on the computers it's been tried on, so the AI path (writing, the download button,
+  progress, checking and aborting) has been tested with a stand-in that behaves like the
+  Summarizer API, and the number checker hasn't yet seen real model output. The fallback to the
+  built-in summary has been confirmed on real hardware.
 
 - **Pages that scroll inside a box.** Some sites (currently BBC) scroll the article inside an
   inner container instead of scrolling the page itself, sometimes switching to that only after
@@ -191,6 +207,9 @@ Held-out accuracy: to be measured.
   where the browser has it, and a rules-only fallback otherwise.
   - Step 15: the rules summary on the card (numbers linked to their figures, collapsible,
     Copy summary) and the number checker, tested against fake AI output
+  - Step 16: the on-device AI summary (the browser's Summarizer API), checked number by number
+    before it's shown, with the rules summary as the fallback; the download button, the popup
+    switch, and a test stand-in for the model
 
 ## Project structure
 
@@ -206,6 +225,7 @@ content/score.js     window.FrogbotScore: sentence splitting, number detection, 
 content/highlight.js window.FrogbotHighlight: exact figure marks, pulses, whole-block fallback
 content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
 content/summary.js   window.FrogbotSummary: the rules summary and the number checker (pure)
+content/ai-summary.js window.FrogbotAI: the on-device AI summary (Summarizer API)
 content/card.js      window.FrogbotCard: the summary card, rendered in a shadow root
 content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
 assets/              The frog artwork and the extension icons (with their SVG sources)
@@ -258,6 +278,7 @@ python tests/browser/run_all.py --skip-live
 | `test_card.py` | The card's rows and order, dark mode, the bottom sheet, isolation from site CSS |
 | `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV |
 | `test_summary.py` | The summary on each page, its links, Copy summary, the remembered open/closed state |
+| `test_ai_summary.py` | The AI summary with a stand-in model: every availability state, the download button, checking, fallback, aborting, clean-up |
 
 They use three kinds of page:
 
@@ -273,7 +294,15 @@ Each suite prints `PASS`, `FAIL` and `SKIP` lines and a summary, and exits with 
 anything failed. `test_card.py` also saves screenshots of every page's card, in light and dark
 mode, to `test-pages/local/screens/` for review by eye. The known BBC issues (inner scrolling
 and start position) can show up as `[live]` failures; `run_all.py` reports those as "known"
-and doesn't fail the run for them, so it's only red when something new breaks.
+and doesn't fail the run for them, so it's only red when something new breaks. Each suite has
+a time limit (20 minutes; `--timeout-minutes` or `FROGBOT_SUITE_TIMEOUT` to change it): a
+suite that runs over is stopped with its browsers, counts as a failure, and the run moves on.
+`--only test_card.py,test_summary.py` runs just those suites.
+
+Headless browsers don't have the on-device model, so `test_ai_summary.py` uses a stand-in,
+`window.__frogbotMockSummarizer`. Frogbot only listens to it when `window.__frogbotTestMode` is
+set and it isn't running as the real extension: in the extension, content scripts run in their
+own isolated world, where a web page's globals aren't visible, so no page can plant one.
 
 To add a detection case, copy one in `tests/detect-cases.js`: give the text, where it came
 from, and the numbers you expect. Only the fields you list are checked, but every number found
@@ -458,7 +487,7 @@ Periods inferred from the page aren't stated, and neither are spans of years tak
 headings ("1984–1991"). With no headline figures on the card, there's no summary.
 
 The number checker (`checkSummary(text, facts, sourceSentences)`) exists for summaries written
-any other way, such as the on-device AI in the next step. Language models can get numbers wrong
+any other way, such as the on-device AI summary. Language models can get numbers wrong
 in ways that read perfectly well: a rounded or invented figure, the right figure for the wrong
 metric, a rise described as a fall, or the wrong quarter. So every number in the text must be
 traced before a sentence is shown:
@@ -473,9 +502,34 @@ traced before a sentence is shown:
 - **Directions** ("rose", "fell", "unchanged") must agree with the fact's.
 
 A sentence with any number that fails is dropped, never corrected, and each kept number links to
-its fact. If more than half the sentences are dropped, or none are left, the summary is rejected,
-so the caller can fall back to the rules summary (the card shows only the rules summary for now). `tests/summary-cases.js` runs the checker on fake
-summaries covering each of these ways to sneak in a wrong number.
+its fact. If more than half the sentences are dropped, or none are left, the summary is rejected
+and the card keeps the rules summary. `tests/summary-cases.js` runs the checker on fake summaries
+covering each of these ways to sneak in a wrong number.
+
+### The on-device AI summary
+
+`content/ai-summary.js` uses the browser's built-in Summarizer API (Edge and Chrome 138 and
+later, on computers that meet the browser's hardware requirements). When the frog is released:
+
+1. Unless "Use on-device AI" is off in the popup (then nothing below happens, and no AI calls are
+   made), Frogbot asks the browser whether the model is available.
+2. **available**: it starts writing straight away, while the frog hops, so the summary is
+   usually ready when the card drops. Until then the card shows the built-in summary with
+   "Writing AI summary…".
+3. **downloadable**: the card shows the built-in summary and a "Get AI summaries (one-time
+   download)" button. The download only starts when that button is clicked (the browser needs a
+   click to start one), with a progress bar; when it's done, the AI summary for this page follows.
+4. **downloading** (started elsewhere): the built-in summary and the progress bar.
+5. **unavailable** (or blocked by the site): the built-in summary only.
+
+The model is given only the chosen sentences and table rows, in page order, with an instruction
+to use only those figures, and asked for short key points in English. Its output then goes
+through the number checker. If it's accepted, the card shows the kept sentences as "AI summary ·
+every number checked", with a grey note such as "1 sentence removed (figure not on the page)"
+(the removed text is in its tooltip) when any were dropped. If it's rejected, empty, fails, or
+takes more than 20 seconds, the built-in summary stays (debug mode logs why). Escape, ×, or
+releasing the frog again stop it, and the summarizer is destroyed after every run, so the model's
+memory is released straight away. Copy summary copies whichever summary is showing.
 
 ### Editing the frog artwork and icons
 
