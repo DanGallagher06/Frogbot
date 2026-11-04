@@ -17,6 +17,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Revenue",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": "2026-09-30",
     "sources": 1
   },
   {
@@ -37,6 +43,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Revenue",
+    "unit": "percent",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": "2026-09-30",
     "sources": 1
   },
   {
@@ -57,6 +69,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": "$176.2M in Q3 2025",
+    "priorValue": 176200000,
+    "metric": "Gross profit",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": "2026-09-30",
     "sources": 1
   },
   {
@@ -77,6 +95,12 @@
     "tolerance": null,
     "priorPeriod": true,
     "prior": null,
+    "priorValue": null,
+    "metric": "Gross profit",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -97,6 +121,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Gross profit",
+    "unit": "percent",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -117,6 +147,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": "$66.3M in Q3 2025",
+    "priorValue": 66300000,
+    "metric": "Operating income",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": "2026-09-30",
     "sources": 1
   },
   {
@@ -137,6 +173,12 @@
     "tolerance": null,
     "priorPeriod": true,
     "prior": null,
+    "priorValue": null,
+    "metric": "Operating income",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -157,6 +199,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Operating income",
+    "unit": "percent",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -177,6 +225,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": "$47.9M in Q3 2025",
+    "priorValue": 47900000,
+    "metric": "Net income",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": "2026-09-30",
     "sources": 1
   },
   {
@@ -197,6 +251,12 @@
     "tolerance": null,
     "priorPeriod": true,
     "prior": null,
+    "priorValue": null,
+    "metric": "Net income",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -217,6 +277,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Net income",
+    "unit": "percent",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -237,6 +303,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "Revenue",
+    "unit": "money",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   },
   {
@@ -257,6 +329,12 @@
     "tolerance": null,
     "priorPeriod": false,
     "prior": null,
+    "priorValue": null,
+    "metric": "EPS",
+    "unit": "per_share",
+    "company": "Lilypad Holdings, Inc.",
+    "ticker": "LILY",
+    "periodEnd": null,
     "sources": 1
   }
 ]

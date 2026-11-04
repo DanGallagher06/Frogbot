@@ -35,11 +35,12 @@
       ["revenue/sales", /\brevenues?\b|\bsales\b/i],
       ["margin", /\bmargins?\b/i],
       ["gross profit", /\bgross profits?\b/i],
-      ["operating income", /\boperating (?:income|profits?|loss)\b|\bEBITD?A?\b/i],
+      ["operating income", /\boperating (?:income|profits?|loss)\b/i],
+      ["EBIT/EBITDA", /\bEBIT(?:DA)?\b/i],
       ["net income", /\bnet (?:income|profits?|earnings|loss)\b|\bprofits?\b|\bincome\b|\bearnings\b/i],
       ["guidance/outlook/forecast", /\bguidance\b|\boutlook\b|\bforecasts?\b/i],
       ["cash flow", /\bcash flow\b/i],
-      ["debt", /\bdebt\b/i],
+      ["debt", /\bdebt\b|\bnet cash\b/i],
       ["dividend/buyback", /\bdividends?\b|\bbuybacks?\b|\brepurchases?\b/i],
       ["growth/estimates", /\bgrowth\b|\bestimates?\b|\bconsensus\b/i],
     ],
@@ -626,7 +627,7 @@
   const CHANGE_TEST = new RegExp(`\\b(?:${[...CHANGE_WORDS].join("|")})\\b`, "i");
   const wordCount = (text) => (text.match(/\S+/g) || []).length;
   const FINANCE_TERM =
-    /\b(?:revenues?|sales|profits?|net income|operating income|margins?|EPS|earnings|guidance|outlook|forecasts?|cash flow|debt|dividends?|buybacks?|repurchases?|growth|estimates?|consensus)\b/i;
+    /\b(?:revenues?|sales|profits?|net income|operating income|EBITDA|EBIT|margins?|EPS|earnings|guidance|outlook|forecasts?|cash flow|debt|net cash|dividends?|buybacks?|repurchases?|growth|estimates?|consensus)\b/i;
   const COMPARISON =
     /\b(?:versus|vs\.?|compared (?:with|to)|year[\s-](?:over|on)[\s-]year|(?:above|below|ahead of|short of|in line with) (?:expectations|estimates|forecasts|consensus)|consensus|a year (?:ago|earlier)|prior[\s-]year)\b|\bfrom\b[^.;]{1,60}?\bto\b/i;
   // Types that count as "a figure" for change words and the only-counts penalty.

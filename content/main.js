@@ -404,7 +404,7 @@
     if (debug && rulesSummary) console.log("Frogbot: summary\n" + Summary.plainText(rulesSummary));
     // The rules summary first; the AI summary replaces it if (and when) it passes the checker.
     const summary = ai.phase === "done" && ai.summary ? ai.summary : rulesSummary;
-    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary, ai: { ...ai }, onGetAI: getAI });
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary, ai: { ...ai }, onGetAI: getAI, page });
     const perch = perchOn(Card.rect());
     await Frogbot.hopToFixed(perch);
     if (cancelled) return;
@@ -523,7 +523,10 @@
   const scoring = scoreAndPick(blocks);
   const targets = fixedTargets() || scoring.targets;
   // One record per caught figure, the data behind the stat card (milestone 2).
-  const facts = Facts.buildFacts(targets, blocks);
+  // The page's own title, structured data and dates give the facts' company, ticker and dates.
+  const info = Extract.pageInfo();
+  const facts = Facts.buildFacts(targets, blocks, { page: info });
+  const page = { ...Facts.pageIdentity({ ...info, texts: blocks.map((b) => b.text) }), publishedDate: info.publishedDate };
   // The rules summary, and the sentences and rows the AI summary is written from (page order).
   const rulesSummary = Summary.rulesSummary(facts);
   const sources = targets

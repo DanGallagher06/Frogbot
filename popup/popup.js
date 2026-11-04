@@ -76,6 +76,7 @@ releaseButton.addEventListener("click", async () => {
         "content/facts.js",
         "content/summary.js",
         "content/ai-summary.js",
+        "content/xlsx.js",
         "content/card.js",
         "content/main.js",
       ],

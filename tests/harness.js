@@ -279,6 +279,12 @@
     check("change", got.change ? got.change.display : null);
     check("linked", Boolean(got.linkedTo));
     check("sources", got.sources.length);
+    check("metric", got.metric);
+    check("unit", got.unit);
+    check("company", got.company);
+    check("ticker", got.ticker);
+    check("periodEnd", got.periodEnd);
+    check("priorValue", got.prior ? got.prior.value : null);
     if ("sentenceStarts" in exp && !got.sentence.startsWith(exp.sentenceStarts)) {
       problems.push(`sentence: expected to start "${exp.sentenceStarts}", got "${got.sentence.slice(0, 40)}"`);
     }
@@ -296,7 +302,7 @@
         if (!got[i]) return;
         for (const p of factProblems(exp, got[i])) problems.push(`fact ${i + 1} ${p}`);
       });
-      const summary = got.map((f) => `${f.label}: ${f.display} (${f.role}, ${f.period ? f.period.text : "no period"} [${f.periodSource}], label ${f.labelConfidence}, period ${f.periodConfidence}${f.showOnCard ? ", card" : ""}${f.direction ? `, ${f.direction} [${f.directionSource}]` : ""}${f.sentiment ? `, ${f.sentiment}` : ""}${f.vsEstimate ? `, ${f.vsEstimate} estimates` : ""}${f.sources.length > 1 ? `, ${f.sources.length} sources` : ""})`);
+      const summary = got.map((f) => `${f.label}: ${f.display} (${f.role}, ${f.period ? f.period.text : "no period"} [${f.periodSource}], label ${f.labelConfidence}, period ${f.periodConfidence}${f.showOnCard ? ", card" : ""}${f.direction ? `, ${f.direction} [${f.directionSource}]` : ""}${f.sentiment ? `, ${f.sentiment}` : ""}${f.vsEstimate ? `, ${f.vsEstimate} estimates` : ""}${f.sources.length > 1 ? `, ${f.sources.length} sources` : ""}${f.company || f.ticker ? `, ${f.company} (${f.ticker})` : ""}${f.periodEnd ? `, ends ${f.periodEnd}` : ""})`);
       const text = c.units.map((u) => (typeof u === "string" ? u : u.text || u.row.join(" | "))).join("  +  ");
       return { text, expect: c.expect, got: summary, problems, pass: problems.length === 0 };
     });

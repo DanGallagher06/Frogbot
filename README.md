@@ -6,8 +6,9 @@ A frog that hops through financial articles and catches the numbers that matter.
 
 ## What it does
 
-- **Finds the key figures** in a finance article or earnings release (revenue, profit, EPS,
-  margins, guidance) by scoring every sentence and table row on the page.
+- **Finds the key figures** in a finance article or earnings release (revenue, profit,
+  EBITDA, EPS, margins, cash flow, debt, guidance) by scoring every sentence and table row on
+  the page, and notes which company and ticker they're about.
 - **Highlights each figure exactly where it appears**, colour-coded by type, as the frog hops
   down the page and flicks its tongue at it.
 - **Delivers a summary card** with the figures it caught, their periods and change arrows
@@ -16,7 +17,9 @@ A frog that hops through financial articles and catches the numbers that matter.
   linked back to the page. Where the browser has an on-device AI model it writes the summary
   with that, and every number the model uses is checked against the page first.
 - **Jumps back to the source**: click any row on the card, or any number in the summary, to
-  scroll to that figure on the page. Copy the table into a spreadsheet, or download it as CSV.
+  scroll to that figure on the page. Copy the table into a spreadsheet, or download it as an
+  Excel workbook (figures formatted as on the card) or a CSV in a stable, documented format
+  ([docs/export-format.md](docs/export-format.md)).
 
 ![A paragraph with its revenue figure highlighted in gold and its growth rate in blue](docs/highlights.png)
 
@@ -133,9 +136,9 @@ so it's tested on its own against hand-written cases:
 | Suite | File | Cases |
 | --- | --- | --- |
 | Number detection and sentence splitting | `tests/detect-cases.js` | 212 |
-| Scoring and target picking | `tests/score-cases.js` | 87 |
-| Fact records (labels, periods, direction) | `tests/facts-cases.js` | 139 |
-| Summary and number checker | `tests/summary-cases.js` | 54 |
+| Scoring and target picking | `tests/score-cases.js` | 92 |
+| Fact records (labels, periods, direction, company, dates) | `tests/facts-cases.js` | 173 |
+| Summary and number checker | `tests/summary-cases.js` | 56 |
 | Held-out set | `tests/holdout-cases.js` | none yet |
 
 All development cases currently pass. `tools/snapshot_targets.py` also checks that the targets
@@ -210,6 +213,9 @@ Held-out accuracy: to be measured.
   - Step 16: the on-device AI summary (the browser's Summarizer API), checked number by number
     before it's shown, with the rules summary as the fallback; the download button, the popup
     switch, and a test stand-in for the model
+  - Step 17: EBITDA, EBIT, net debt, net cash and net margin as their own metrics; the page's
+    company and ticker (shown under the card's title) and each figure's own; published and
+    period end dates; CSV format version 1, documented in `docs/export-format.md`
 
 ## Project structure
 
@@ -219,17 +225,19 @@ popup/               The toolbar popup with the "Release the frog" button
 content/main.js      Entry point injected on click: extracts, picks targets, runs the hops
 content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show()/remove()
 content/extract.js   window.FrogbotExtract: main-content detection, text blocks, scoring
-                     units, and mapping text positions back to the page
+                     units, mapping text positions back to the page, and pageInfo() (title,
+                     structured data, meta tags, published date)
 content/score.js     window.FrogbotScore: sentence splitting, number detection, scoring
                      and target picking (pure functions, no page access)
 content/highlight.js window.FrogbotHighlight: exact figure marks, pulses, whole-block fallback
 content/facts.js     window.FrogbotFacts: one record per caught figure (label, period, role)
 content/summary.js   window.FrogbotSummary: the rules summary and the number checker (pure)
 content/ai-summary.js window.FrogbotAI: the on-device AI summary (Summarizer API)
+content/xlsx.js      window.FrogbotXlsx: a small .xlsx writer (zipped XML) for the Excel export
 content/card.js      window.FrogbotCard: the summary card, rendered in a shadow root
 content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
 assets/              The frog artwork and the extension icons (with their SVG sources)
-docs/                The demo GIF and screenshots used in this README
+docs/                The demo GIF and screenshots used in this README, and export-format.md
 test-pages/          Local pages written for testing (no copied pages)
 tests/               Test cases, the browser test runner, snapshots of each test page's
                      targets and fact records, and the optional browser suites (tests/browser/)
@@ -259,7 +267,10 @@ GIF.
 `tests/browser/` holds end-to-end suites that run the real extension code in headless Edge:
 the frog's hops and tongue, extraction and the debug view, number detection on real pages,
 scoring and target choice, exact highlighting and exact restore, fact records on real pages, the
-card, and the card's row clicks and exports. They need Selenium (`pip install selenium`).
+card, and the card's row clicks and exports. They need Selenium, and openpyxl for the Excel
+export checks (`pip install selenium openpyxl`). Where Microsoft Excel is installed, the Excel
+exports are also opened in Excel, which must show every figure as the card does and must not
+need to repair the file; without Excel those checks are skipped.
 
 ```
 python tests/browser/run_all.py            # every suite, with a summary at the end
@@ -274,9 +285,9 @@ python tests/browser/run_all.py --skip-live
 | `test_detection.py` | Number counts and junk on real pages, detection speed |
 | `test_scoring.py` | Target choice, no junk or repeated figures, hopping downward, scoring time |
 | `test_highlights.py` | Exact figure highlighting, and the page restored byte for byte after Escape |
-| `test_facts_pages.py` | Every fact's figure appears on its page, and none is junk |
+| `test_facts_pages.py` | Every fact's figure appears on its page, and none is junk; each page's company, ticker, published and period end dates |
 | `test_card.py` | The card's rows and order, dark mode, the bottom sheet, isolation from site CSS |
-| `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV |
+| `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV, Download Excel (file structure, number formats, dates, widths, frozen header, filters; opened in Excel when it's installed) |
 | `test_summary.py` | The summary on each page, its links, Copy summary, the remembered open/closed state |
 | `test_ai_summary.py` | The AI summary with a stand-in model: every availability state, the download button, checking, fallback, aborting, clean-up |
 
@@ -377,16 +388,24 @@ the frog.
 
 ### Fact records
 
-`FrogbotFacts.buildFacts(targets, blocks)` turns every caught figure into a record. Each has
+`FrogbotFacts.buildFacts(targets, blocks, { page })` turns every caught figure into a record
+(`page` is `FrogbotExtract.pageInfo()`: the page's title, structured data, meta tags and
+published date). Each has
 the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, and a short
 `display` like "$482.6M" or "$505M–$525M"), plus:
 
 - **label**: the table row header, or the nearest finance term before the figure in the same
-  clause ("Revenue", "Operating income", "Diluted EPS"...), with qualifiers attached: GAAP /
+  clause ("Revenue", "Operating income", "EBITDA", "Net debt", "Diluted EPS"...), with
+  qualifiers attached: GAAP /
   non-GAAP, adjusted, diluted, organic, a segment name ("Gaming revenue"), or a table title.
   Guidance figures get "Guidance: <metric>". A percentage that's a share of a group ("83% of
   S&P 500 companies", "24% having released results") takes no metric label. When no term is
-  found, the label is a short snippet of the text around the figure.
+  found, the label is a short snippet of the text around the figure. EBITDA and EBIT are their
+  own metrics, never operating income ("Adjusted EBITDA" is EBITDA, qualified "adjusted"); debt
+  (also "total debt", "gross debt"), net debt and net cash are three separate metrics, and so
+  are net margin and margin. **metric** is the label's term on its own ("Operating income" for
+  "Non-GAAP operating income"; null for a snippet label), and **unit** is `money`, `percent`, `basis_points`,
+  `per_share`, `multiple` or `count`.
 - **role**: `level`, `change` (rose 14.2%, +19.1%, year-over-year), `guidance` or `estimate`
   (analyst or consensus figures). A change is linked to the level with the same label in the
   same clause or row (`change` on the level, `linkedTo` on the change); a level shows a
@@ -409,6 +428,17 @@ the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, a
   "Q3 2025"), the earlier columns are `priorPeriod` (off the card), and the current figure's
   `prior` is the one it's compared with (the same period a year earlier, else the latest
   before it).
+- **company** and **ticker**: the company a figure's own sentence names with a ticker
+  ("Meta Platforms (META) earnings…"), else the page's. The page's comes from, in order: a
+  company infobox's "Traded as" row (Wikipedia's; read only for this, never scored), exchange
+  tickers in the text ("(NASDAQ: NVDA)", "(NYSE: KO)", "Nasdaq: AAPL", "LSE: BP."),
+  with the name written before it; structured data (a JSON-LD company with a `tickerSymbol`, or
+  the one organisation a news article is `about`, never its publisher); then a
+  "<Company> reports … results" title. When several companies are equally likely (a round-up of
+  earnings week), both are left blank. Tickers stay junk for number detection.
+- **periodEnd**: the period's last day (`YYYY-MM-DD`) when the page states it: a date in the
+  period itself ("Three Months Ended July 27, 2025"), or a "second quarter ended July 27, 2025"
+  phrase for the same quarter (and year, or fiscal year from the same sentence or the title).
 - **sources**: every place the figure was caught. The same figure with the same label, period
   and qualifiers is merged into one record (money within 0.5%, percentages exactly), keeping the
   most confident copy. Different qualifiers (GAAP vs non-GAAP) are never merged.
@@ -430,8 +460,9 @@ the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, a
 
   A linked change passes its direction to its level (if they disagree, the level gets none).
 - **sentiment** (`good`, `bad`, `neutral` or null), for canonical metrics only. Up is good for
-  revenue, profits, EPS, margins, cash flow, cash, dividends and buybacks; up is bad for
-  operating expenses, debt and losses; capital expenditure is neutral; flat is neutral.
+  revenue, profits, EBITDA, EBIT, EPS, margins, cash flow, cash, net cash, dividends and
+  buybacks; up is bad for operating expenses, debt, net debt and losses; capital expenditure
+  is neutral; flat is neutral.
 - **vsEstimate** (`above`, `below` or null): "beat", "above consensus", "missed", "below
   estimates" said about the figure itself. It sets the sentiment when present.
 - **tolerance**: "plus or minus 2%", "±2%" or "plus or minus 50 basis points" on a guidance
@@ -445,8 +476,10 @@ Money displays keep the page's decimal places when the unit matches ("$54.0 bill
 - **Rows**: one main row per metric (label with its qualifiers, plus role). A metric's main row
   is its most recent period, then the higher label and period confidence, then the higher
   score; its other rows only appear under "Show all". Metrics go by importance: revenue, gross
-  profit, operating income, net income, EPS, margins and cash flow, then guidance, then segment
-  figures, then everything else; within that, levels come before standalone changes.
+  profit, operating income, EBITDA (and EBIT), net income, EPS, margins, cash flow and debt,
+  then guidance, then segment figures, then everything else; within that, levels come before
+  standalone changes.
+- **Subtitle**: the page's company and ticker under the title ("NVIDIA (NVDA)"), when known.
 - **Columns**: Metric, Figure (with a dot in its highlight colour), Change (arrow plus the
   linked change; a tooltip gives the earlier column it's compared with, "vs $176.2M in
   Q3 2025") and Period (lighter and italic, with a tooltip, when inferred from the page).
@@ -458,13 +491,23 @@ Money displays keep the page's decimal places when the unit matches ("$54.0 bill
   several places cycles through them, with a "1/2" badge. If the highlight has gone because the
   page re-rendered, the block it came from is outlined instead. With reduced motion, the jump is
   instant and the figure gets a static outline.
-- **Copy table** copies the main table and its "Show all" rows as tab-separated text (Metric,
-  Figure, Change, Direction, Period), falling back to `execCommand("copy")` where the clipboard
+- **Copy table** copies the main table and its "Show all" rows as tab-separated text (Company,
+  Metric, Figure, Change, Direction, Period), falling back to `execCommand("copy")` where the clipboard
   API is refused.
-- **Download CSV** saves `frogbot-<site>-<yyyy-mm-dd>.csv` with every row: section, metric,
-  figure, value, low, high, currency, type, role, change, direction, sentiment, period,
-  period_inferred, prior, source_text, page_url and captured_at. It starts with a UTF-8 BOM so
-  Excel shows £, € and – correctly.
+- **Download Excel** (the main button) saves `frogbot-<site>-<yyyy-mm-dd>.xlsx` with the same
+  rows and columns as the CSV (apart from `figure`): every figure is a number with a number
+  format that displays it as the card does ($482.6M, 14.2%, 40 bps, $1.24, 2.5x, with £ or €
+  where the page uses them), ranges have their own low and high cells, dates are real dates,
+  and the header is bold and frozen, with filters on and widths fitted. `content/xlsx.js` writes
+  the file itself (an .xlsx is a zip of XML), with no library and no network.
+- **Download CSV** (the smaller link) saves `frogbot-<site>-<yyyy-mm-dd>.csv` with every row (main, "Show all",
+  then "Also caught") in CSV format version 1: company, ticker, metric, qualifiers, the figure
+  and its plain-number value, unit and currency, range ends, role, period and its end date,
+  confidences, the signed change, direction, the prior figure, versus estimates, the source
+  text, the page's URL and published date, and when it was captured. Every column is described
+  in [docs/export-format.md](docs/export-format.md). It starts with a UTF-8 BOM so Excel shows £, €
+  and – correctly. `tests/browser/save_exports.py` saves a sample .xlsx and .csv from each
+  test page to `test-pages/local/exports/`.
 - The card is a `role="dialog"`, follows the browser's dark mode, and becomes a full-width
   bottom sheet in windows narrower than 480px. It lives in a shadow root on a zero-size host
   element with inline `!important` styles, so only the card takes clicks and the site's CSS

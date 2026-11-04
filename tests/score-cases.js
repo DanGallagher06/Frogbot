@@ -210,6 +210,11 @@
     { kind: "topic", text: "Gross profit | $209.9 | $176.2 | +19.1%", topic: "gross profit" },
     { kind: "topic", text: "Operating income rose 26.7% to $84.0 million.", topic: "operating income" },
     { kind: "topic", text: "Net income for Q3 2026 was $61.3 million.", topic: "net income" },
+    { kind: "topic", text: "Adjusted EBITDA rose 12% to $1.2 billion.", topic: "EBIT/EBITDA" },
+    { kind: "topic", text: "EBIT was $3.0 billion for the quarter.", topic: "EBIT/EBITDA" },
+    { kind: "topic", text: "The company ended the quarter with net debt of $3.4 billion.", topic: "debt" },
+    { kind: "topic", text: "It had a net cash position of $1.6 billion.", topic: "debt" },
+    { kind: "topic", text: "Net margin of 18% for the quarter.", topic: "margin" },
     { kind: "topic", text: "Diluted earnings per share were $1.27.", topic: "EPS/per share" },
 
     // ---- Topics: guidance is the company's own forward-looking statements ----

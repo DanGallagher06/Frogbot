@@ -8,7 +8,10 @@
 //   context: { pagePeriod: { text, value } } stands in for the page's dominant period
 //   expect: [{ label, display, role, period (text or null), periodSource, confidence,
 //              qualifiers, change (display of the linked change), linked (true), sources (count),
-//              sentenceStarts (start of the kept record's sentence) }]
+//              sentenceStarts (start of the kept record's sentence), metric, unit, company,
+//              ticker, periodEnd, priorValue }]
+//   context.page: { title, jsonld, meta, infobox } stands in for what extract.js reads from the page
+//           (the units' texts stand in for the page's text)
 (() => {
   const Q3 = { pagePeriod: { text: "Q3 2026", value: 2026 } };
   const cases = [
@@ -795,6 +798,234 @@
       // Equal confidence: the prose record is kept, with both sources.
       units: ["In Q2 FY26, the company reported strong results, and revenue was $46.7 billion.", { row: ["Revenue", "$46,743"], headers: [null, "Q2 FY26"], scale: "million" }],
       expect: [{ label: "Revenue", display: "$46.7B", sources: 2, confidence: "medium", sentenceStarts: "In Q2 FY26" }],
+    },
+    // ---- Step 17: EBITDA, EBIT, debt, net debt, net cash and net margin are separate metrics ----
+    {
+      units: ["Adjusted EBITDA rose 12% to $1.2 billion in Q3 2026."],
+      expect: [
+        { label: "Adjusted EBITDA", display: "12%", role: "change", metric: "EBITDA", qualifiers: ["adjusted"], unit: "percent" },
+        { label: "Adjusted EBITDA", display: "$1.2B", role: "level", metric: "EBITDA", qualifiers: ["adjusted"], unit: "money", direction: "up", sentiment: "good" },
+      ],
+    },
+    {
+      units: ["EBITDA was $4.1 billion and EBIT was $3.0 billion for the quarter."],
+      context: Q3,
+      expect: [
+        { label: "EBITDA", display: "$4.1B", metric: "EBITDA" },
+        { label: "EBIT", display: "$3.0B", metric: "EBIT" },
+      ],
+    },
+    {
+      // Never folded into operating income.
+      units: ["Operating income was $2.2 billion, while EBITDA reached $2.9 billion."],
+      context: Q3,
+      expect: [
+        { label: "Operating income", display: "$2.2B" },
+        { label: "EBITDA", display: "$2.9B" },
+      ],
+    },
+    {
+      units: ["The company ended the quarter with net debt of $3.4 billion and total debt of $5.1 billion."],
+      context: Q3,
+      expect: [
+        { label: "Net debt", display: "$3.4B", metric: "Net debt" },
+        { label: "Debt", display: "$5.1B", metric: "Debt" },
+      ],
+    },
+    {
+      // Net debt falling is good.
+      units: ["Net debt fell 8% to $3.4 billion in Q3 2026."],
+      expect: [
+        { label: "Net debt", display: "8%", role: "change" },
+        { label: "Net debt", display: "$3.4B", direction: "down", sentiment: "good" },
+      ],
+    },
+    {
+      units: ["It had a net cash position of $1.6 billion at the end of Q3 2026."],
+      expect: [{ label: "Net cash", display: "$1.6B", metric: "Net cash" }],
+    },
+    {
+      units: ["Net margin of 18% compared with a gross margin of 41% in Q3 2026."],
+      expect: [
+        { label: "Net margin", display: "18%", metric: "Net margin", unit: "percent" },
+        { label: "Gross margin", display: "41%" },
+      ],
+    },
+    {
+      units: ["Net profit margin widened to 12.5% in Q3 2026."],
+      expect: [{ label: "Net margin", display: "12.5%" }],
+    },
+    {
+      units: ["Net cash provided by operating activities was $15.4 billion in Q2 FY26."],
+      expect: [{ label: "Operating cash flow", display: "$15.4B", metric: "Operating cash flow" }],
+    },
+
+    // ---- Step 17: export fields: the metric without qualifiers, unit, prior value ----
+    {
+      units: [{ row: ["Non-GAAP operating income", "$30,165", "$19,937"], headers: [null, "Q2 FY26", "Q2 FY25"], scale: "million" }],
+      expect: [
+        { label: "Non-GAAP operating income", display: "$30.2B", metric: "Operating income", qualifiers: ["non-GAAP"], unit: "money", priorValue: 19937000000 },
+        { label: "Non-GAAP operating income", display: "$19.9B", priorPeriod: true },
+      ],
+    },
+    {
+      units: ["Diluted earnings per share were $1.27 in Q3 2026."],
+      expect: [{ label: "Diluted EPS", metric: "EPS", unit: "per_share", qualifiers: ["diluted"] }],
+    },
+
+    // ---- Step 17: the page's company and ticker ----
+    {
+      // An exchange ticker in the text names the page's company; every fact inherits it.
+      units: [
+        "Lilypad Holdings, Inc. (NASDAQ: LILY) today announced results for Q3 2026.",
+        "Revenue was $482.6 million in Q3 2026.",
+      ],
+      expect: [{ display: "$482.6M", company: "Lilypad Holdings, Inc.", ticker: "LILY" }],
+    },
+    {
+      units: ["Shares of Coca-Cola (NYSE: KO) rose after revenue of $12.4 billion in Q3 2026."],
+      expect: [{ display: "$12.4B", company: "Coca-Cola", ticker: "KO" }],
+    },
+    {
+      units: ["BP p.l.c. (LSE: BP.) reported a profit of $2.6 billion in Q3 2026."],
+      expect: [{ display: "$2.6B", company: "BP p.l.c.", ticker: "BP" }],
+    },
+    {
+      // A ticker with no name before it takes the name from the title.
+      units: ["Nasdaq: AAPL", "Revenue was $102.5 billion in Q4 2025."],
+      context: { page: { title: "Apple Inc. | Investor Relations" } },
+      expect: [{ display: "$102.5B", company: "Apple Inc.", ticker: "AAPL" }],
+    },
+    {
+      // Several companies equally likely: both blank, not a guess.
+      units: [
+        "Alphabet (NASDAQ: GOOGL) and Microsoft (NASDAQ: MSFT) both report this week.",
+        "Earnings for the S&P 500 are expected to grow 7% in Q3 2026.",
+      ],
+      expect: [{ display: "7%", company: null, ticker: null }],
+    },
+    {
+      // A sentence naming its own company with a ticker takes that, over the page's.
+      units: [
+        "Alphabet (NASDAQ: GOOGL) leads the busiest week, ahead of Amazon (NASDAQ: AMZN).",
+        "Meta Platforms (META) earnings are expected to be $9.89 billion in Q3 2026.",
+        "Revenue for the group rose to $50 billion in Q3 2026.",
+      ],
+      expect: [
+        { display: "$9.89B", company: "Meta Platforms", ticker: "META" },
+        { display: "$50B", company: null, ticker: null },
+      ],
+    },
+    {
+      // Capitals in brackets that aren't tickers.
+      units: ["Earnings per share (EPS) were $1.42 on a GAAP basis (GAAP) in Q3 2026."],
+      expect: [{ display: "$1.42", company: null, ticker: null }],
+    },
+    {
+      // Structured data: a company with a ticker symbol.
+      units: ["Revenue was $46.7 billion in Q2 FY26."],
+      context: { page: { jsonld: [{ "@context": "https://schema.org", "@graph": [{ "@type": "Corporation", name: "NVIDIA", tickerSymbol: "NASDAQ NVDA" }] }] } },
+      expect: [{ display: "$46.7B", company: "NVIDIA", ticker: "NVDA" }],
+    },
+    {
+      // Structured data: the one company an article is about (never its publisher).
+      units: ["Revenue was $46.7 billion in Q2 FY26."],
+      context: { page: { jsonld: [{ "@type": "NewsArticle", publisher: { "@type": "Organization", name: "Daily Wire" }, about: { "@type": "Organization", name: "NVIDIA" } }] } },
+      expect: [{ display: "$46.7B", company: "NVIDIA", ticker: null }],
+    },
+    {
+      units: ["Revenue was $46.7 billion in Q2 FY26."],
+      context: { page: { jsonld: [{ "@type": "NewsArticle", about: [{ "@type": "Organization", name: "NVIDIA" }, { "@type": "Organization", name: "AMD" }] }] } },
+      expect: [{ display: "$46.7B", company: null, ticker: null }],
+    },
+    {
+      // The title: "<Company> reports ... results".
+      units: ["Revenue was $102.5 billion in the fourth quarter."],
+      context: { page: { title: "Apple reports fourth quarter results - Apple Newsroom" } },
+      expect: [{ display: "$102.5B", company: "Apple", ticker: null }],
+    },
+    {
+      // A publisher's headline names no company.
+      units: ["Revenue was $102.5 billion in Q4 2025."],
+      context: { page: { title: "The busiest week of earnings season | Forbes" } },
+      expect: [{ display: "$102.5B", company: null, ticker: null }],
+    },
+
+    // ---- Step 17: a company infobox ("Traded as" on Wikipedia) ----
+    {
+      // The infobox's first ticker and its name; it isn't article text.
+      units: ["Revenue was $130.5 billion in fiscal 2025."],
+      context: { page: { title: "Nvidia - Wikipedia", infobox: { name: "Nvidia Corporation", tradedAs: "Nasdaq: NVDA Nasdaq-100 component DJIA component S&P 100 component" } } },
+      expect: [{ display: "$130.5B", company: "Nvidia Corporation", ticker: "NVDA" }],
+    },
+    {
+      // No name in the infobox: the title's.
+      units: ["Revenue was $391 billion in fiscal 2024."],
+      context: { page: { title: "Apple Inc. - Wikipedia", infobox: { name: null, tradedAs: "Nasdaq : AAPL" } } },
+      expect: [{ display: "$391B", company: "Apple Inc.", ticker: "AAPL" }],
+    },
+    {
+      // Several share classes: the first is the page's ticker.
+      units: ["Revenue was $350 billion in 2024."],
+      context: { page: { title: "Alphabet Inc. - Wikipedia", infobox: { name: "Alphabet Inc.", tradedAs: "Nasdaq: GOOGL (Class A) Nasdaq: GOOG (Class C)" } } },
+      expect: [{ display: "$350B", company: "Alphabet Inc.", ticker: "GOOGL" }],
+    },
+    {
+      // An infobox with no "Traded as" row (a private company) gives nothing on its own.
+      units: ["Revenue was $5 billion in 2024."],
+      context: { page: { title: "Mars Inc. - Wikipedia", infobox: { name: "Mars, Incorporated", tradedAs: null } } },
+      expect: [{ display: "$5B", company: null, ticker: null }],
+    },
+
+    // ---- Step 17: a snippet label is not a metric ----
+    {
+      units: ["About 83% of S&P 500 companies have beaten estimates in Q3 2026."],
+      expect: [{ display: "83%", labelConfidence: "low", metric: null }],
+    },
+    {
+      units: ["Revenue was $5.2 billion in Q3 2026."],
+      expect: [{ display: "$5.2B", labelConfidence: "high", metric: "Revenue" }],
+    },
+
+    // ---- Step 17: period end dates ----
+    {
+      units: [
+        "NVIDIA today reported revenue for the second quarter ended July 27, 2025, of $46.7 billion.",
+        "Gross margin was 72.4% in Q2 FY26.",
+      ],
+      context: { page: { title: "NVIDIA Announces Financial Results for Second Quarter Fiscal 2026" } },
+      expect: [
+        { display: "$46.7B", periodEnd: "2025-07-27" },
+        { display: "72.4%", period: "Q2 FY26", periodEnd: "2025-07-27" },
+      ],
+    },
+    {
+      // The date in a table's own period header.
+      units: [{ row: ["Revenue", "$46,743", "$30,040"], headers: [null, "Three Months Ended July 27, 2025", "Three Months Ended July 28, 2024"], scale: "million" }],
+      expect: [
+        { display: "$46.7B", periodEnd: "2025-07-27" },
+        { display: "$30B", periodEnd: "2024-07-28" },
+      ],
+    },
+    {
+      // "Third quarter ended September 30, 2026" fits Q3 2026 only, not Q3 2025.
+      units: [
+        "Lilypad announced results for the third quarter ended September 30, 2026.",
+        "Net income was $61.3 million in Q3 2026, compared with $47.9 million in Q3 2025.",
+      ],
+      expect: [
+        { display: "$61.3M", periodEnd: "2026-09-30" },
+        { display: "$47.9M", periodEnd: null },
+      ],
+    },
+    {
+      units: ["Apple announced financial results for its fiscal 2025 fourth quarter ended September 27, 2025, posting revenue of $102.5 billion."],
+      expect: [{ display: "$102.5B", periodEnd: "2025-09-27" }],
+    },
+    {
+      // No end date on the page: blank.
+      units: ["Revenue was $482.6 million in Q3 2026."],
+      expect: [{ display: "$482.6M", periodEnd: null }],
     },
   ];
 

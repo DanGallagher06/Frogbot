@@ -131,7 +131,8 @@ def card_checks():
         text = d.execute_async_script("const done = arguments[0]; navigator.clipboard.readText().then(done, e => done('ERR ' + e))").replace("\r\n", "\n")
         report("Copy summary copies the sentences as plain text", shown == "Copied ✓" and text == "\n".join(s["items"]) + "\n", f"{shown!r} {text[:80]!r}")
         buttons = d.execute_script(f"return [...{CARD}.querySelectorAll('.actions button')].map(b => b.className)")
-        report("Copy summary sits next to Copy table", buttons[:2] == ["action copy", "action copy-summary"], str(buttons))
+        report("Download Excel first (primary), Copy summary next to Copy table, Download CSV last (secondary)",
+               buttons == ["action primary xlsx", "action copy", "action copy-summary", "action secondary csv"], str(buttons))
 
         # Collapse, then the next run remembers it.
         d.execute_script(f"{CARD}.querySelector('.summary-toggle').click()")

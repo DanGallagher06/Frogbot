@@ -1,5 +1,5 @@
 // Frogbot: finds the page's article content as a list of text blocks.
-// Defines window.FrogbotExtract with findMainContainer() and getBlocks().
+// Defines window.FrogbotExtract with findMainContainer(), getBlocks() and pageInfo().
 (() => {
   if (window.FrogbotExtract) return;
 
@@ -740,5 +740,95 @@
   }
   const isSpaceChar = (ch) => /\s/.test(ch || "");
 
-  window.FrogbotExtract = { findMainContainer, getBlocks, buildUnits, rangesFor };
+  // What the page says about itself, for the facts' company, ticker and dates: its title, its
+  // structured data (JSON-LD objects), a few meta tags, and its published date (from
+  // article:published_time, JSON-LD datePublished, or a <time datetime> near the headline).
+  function pageInfo() {
+    const jsonld = [];
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        jsonld.push(JSON.parse(script.textContent));
+      } catch {
+        // Broken structured data is common; skip it.
+      }
+    }
+    const meta = {};
+    for (const tag of document.querySelectorAll("meta[name], meta[property], meta[itemprop]")) {
+      const key = (tag.getAttribute("property") || tag.getAttribute("name") || tag.getAttribute("itemprop")).toLowerCase();
+      if (!(key in meta) && tag.content) meta[key] = tag.content.trim();
+    }
+    // Wikipedia's structured data dates the article's creation, not when its figures were
+    // written, so a Wikipedia page has no published date.
+    const wiki = /(?:^|\.)wikipedia\.org$/.test(location.hostname) || /^MediaWiki\b/.test(meta.generator || "");
+    return { title: document.title || "", jsonld, meta, infobox: infobox(), wiki, publishedDate: wiki ? null : publishedDate(jsonld, meta) };
+  }
+
+  // A company infobox (Wikipedia's): its name and its "Traded as" row ("Nasdaq: NVDA"), for the
+  // page's company and ticker only. The infobox is never article text for scoring.
+  function infobox() {
+    const box = document.querySelector("table.infobox");
+    if (!box) return null;
+    const text = (node) => {
+      if (!node) return "";
+      const copy = node.cloneNode(true);
+      copy.querySelectorAll("style, script, sup").forEach((n) => n.remove());
+      return copy.textContent.replace(/\s+/g, " ").trim();
+    };
+    const above = box.querySelector(".infobox-above, caption");
+    let tradedAs = "";
+    for (const th of box.querySelectorAll("th")) {
+      if (/^traded as$/i.test(text(th))) tradedAs = text(th.parentElement.querySelector("td"));
+    }
+    return { name: text(above) || null, tradedAs: tradedAs || null };
+  }
+
+  // A published date as "YYYY-MM-DD", or null.
+  function publishedDate(jsonld, meta) {
+    const day = (value) => {
+      const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+    };
+    for (const key of ["article:published_time", "datepublished", "og:published_time", "publish-date", "pubdate"]) {
+      if (day(meta[key])) return day(meta[key]);
+    }
+    const found = [];
+    const walk = (o) => {
+      if (!o || typeof o !== "object") return;
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o.datePublished) found.push(o.datePublished);
+      if (o["@graph"]) walk(o["@graph"]);
+    };
+    walk(jsonld);
+    for (const value of found) if (day(value)) return day(value);
+    // A <time datetime> near the headline: in the same header or article as the first h1.
+    const h1 = document.querySelector("h1");
+    const scope = h1 && (h1.closest("header, article, main") || h1.parentElement);
+    const time = (scope && scope.querySelector("time[datetime]")) || null;
+    if (time && day(time.getAttribute("datetime"))) return day(time.getAttribute("datetime"));
+    // Else a line by the headline that's only a date ("August 27, 2025"), as press releases have.
+    if (scope) {
+      for (const node of [...scope.querySelectorAll("time, span, div, p")].slice(0, 80)) {
+        const text = node.textContent.replace(/\s+/g, " ").trim();
+        if (text.length > 30 || node.children.length > 1) continue;
+        const iso = textDate(text);
+        if (iso) return iso;
+      }
+    }
+    return null;
+  }
+
+  const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  // "August 27, 2025" or "27 August 2025", and nothing else, as "2025-08-27".
+  function textDate(text) {
+    let m = text.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+((?:19|20)\d{2})$/);
+    let month, date, year;
+    if (m) [, month, date, year] = m;
+    else if ((m = text.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+((?:19|20)\d{2})$/))) [, date, month, year] = m;
+    else return null;
+    const index = MONTHS.indexOf(month.slice(0, 3).toLowerCase());
+    if (index < 0 || Number(date) < 1 || Number(date) > 31) return null;
+    return `${year}-${String(index + 1).padStart(2, "0")}-${String(date).padStart(2, "0")}`;
+  }
+
+  window.FrogbotExtract = { findMainContainer, getBlocks, buildUnits, rangesFor, pageInfo };
 })();

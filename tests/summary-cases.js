@@ -31,6 +31,19 @@
 
   const rules = [
     {
+      name: "EBITDA comes after operating income, and net debt is its own metric",
+      units: [
+        "Net debt fell to $3.4 billion in Q3 2026.",
+        "Adjusted EBITDA rose 12% to $1.2 billion in Q3 2026.",
+        "Revenue rose 8% to $5.0 billion in Q3 2026.",
+      ],
+      expect: [
+        "Revenue rose 8% to $5.0B in Q3 2026.",
+        "Adjusted EBITDA rose 12% to $1.2B in Q3 2026.",
+        "Net debt fell to $3.4B in Q3 2026.",
+      ],
+    },
+    {
       name: "the sample release: headline, a row, a pair, and the outlook",
       units: LILYPAD,
       expect: [
@@ -102,6 +115,12 @@
   ];
 
   const checker = [
+    {
+      name: "net debt and total debt are different figures",
+      units: ["The company ended Q3 2026 with net debt of $3.4 billion and total debt of $5.1 billion."],
+      summary: "Net debt was $3.4B. Net debt was $5.1B.",
+      expect: { keep: [true, false], links: { "$3.4B": "Net debt" } },
+    },
     // ---- Correct summaries are kept ----
     {
       name: "the rules summary itself",

@@ -4,7 +4,8 @@ For every page in test-pages/ (not test-pages/local/), this renders a temporary 
 page with content/extract.js, score.js and facts.js added, in headless Edge or Chrome, runs
 extraction, scoring and fact building, and records the chosen targets (unit index, score,
 kind, first 80 characters) in tests/snapshots/<page>.json and the fact records (label,
-display, role, period, label/period confidence, card eligibility, sources) in tests/snapshots/<page>.facts.json.
+display, role, period, label/period confidence, card eligibility, sources, metric, unit,
+company, ticker, period end date) in tests/snapshots/<page>.facts.json.
 
   python tools/snapshot_targets.py           compare with the saved snapshots, print changes
   python tools/snapshot_targets.py --update  save the current picks as the new snapshots
@@ -45,7 +46,7 @@ RUNNER = """
       if (!byElement.has(u.element)) byElement.set(u.element, { units: [] });
       byElement.get(u.element).units.push(u);
     }
-    const facts = FrogbotFacts.buildFacts([...byElement.values()], blocks);
+    const facts = FrogbotFacts.buildFacts([...byElement.values()], blocks, { page: FrogbotExtract.pageInfo() });
     out.textContent = JSON.stringify({
       targets: chosen.map((u) => ({
         index: units.indexOf(u),
@@ -71,6 +72,12 @@ RUNNER = """
         tolerance: f.tolerance ? f.tolerance.display : null,
         priorPeriod: f.priorPeriod,
         prior: f.prior ? `${f.prior.display} in ${f.prior.period}` : null,
+        priorValue: f.prior ? f.prior.value : null,
+        metric: f.metric,
+        unit: f.unit,
+        company: f.company,
+        ticker: f.ticker,
+        periodEnd: f.periodEnd,
         sources: f.sources.length,
       })),
     });

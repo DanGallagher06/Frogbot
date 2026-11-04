@@ -31,7 +31,9 @@ PAGES = ["test-page", "captions-page", "mapping-page", "nvidia-release", "apple-
 
 def load(d, name, hostile=False):
     open_page(d, name)
-    d.execute_script("window.__errors = []; addEventListener('error', e => __errors.push(e.message));")
+    # "ResizeObserver loop completed..." is the browser's notice about a page's own observers
+    # (BBC's); Frogbot uses none, so it isn't a Frogbot error.
+    d.execute_script("window.__errors = []; addEventListener('error', e => /^ResizeObserver loop/.test(e.message) || __errors.push(e.message));")
     add_css(d)
     if hostile:
         # A site with aggressive CSS: none of it may reach the card.

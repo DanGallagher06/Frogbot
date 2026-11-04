@@ -14,9 +14,14 @@
   // position the longer match wins anyway ("gross margin" over "margin").
   const TERMS = [
     ["Free cash flow", /\bfree cash flows?\b/gi],
-    ["Operating cash flow", /\b(?:operating cash flows?|cash (?:flow )?from operations)\b/gi],
+    ["Operating cash flow", /\b(?:operating cash flows?|cash (?:flow )?from operations|net cash (?:provided by|from|generated (?:by|from)) operating activities)\b/gi],
     ["Gross margin", /\bgross margins?\b/gi],
     ["Operating margin", /\boperating margins?\b/gi],
+    ["Net margin", /\bnet (?:profit )?margins?\b/gi],
+    // EBITDA and EBIT are their own metrics, not operating income ("Adjusted EBITDA" is EBITDA,
+    // qualified "adjusted").
+    ["EBITDA", /\bEBITDA\b/g],
+    ["EBIT", /\bEBIT\b/g],
     ["Gross profit", /\bgross profits?\b/gi],
     ["Operating income", /\b(?:operating (?:income|profits?|loss)|income from operations)\b/gi],
     ["Operating expenses", /\b(?:operating expenses?|opex)\b/gi],
@@ -27,7 +32,11 @@
     ["Buyback", /\b(?:buybacks?|share repurchases?|repurchases?)\b/gi],
     ["Revenue", /\b(?:revenues?|net sales|sales|turnover)\b/gi],
     ["Cash", /\bcash(?: and (?:cash )?equivalents)?\b/gi],
-    ["Debt", /\b(?:net )?debt\b/gi],
+    // Net debt, debt and net cash are different figures; the longer match wins, so "net debt"
+    // is never just "Debt".
+    ["Net debt", /\bnet debt\b/gi],
+    ["Net cash", /\bnet cash(?: position)?\b/gi],
+    ["Debt", /\b(?:total |gross )?debt\b/gi],
     ["Margin", /\bmargins?\b/gi],
     ["Profit", /\bprofits?\b/gi],
     ["Earnings", /\bearnings\b/gi],
@@ -43,10 +52,15 @@
     EPS: "EPS/per share",
     "Gross margin": "margin",
     "Operating margin": "margin",
+    "Net margin": "margin",
     Margin: "margin",
+    EBITDA: "EBIT/EBITDA",
+    EBIT: "EBIT/EBITDA",
     "Free cash flow": "cash flow",
     "Operating cash flow": "cash flow",
     Debt: "debt",
+    "Net debt": "debt",
+    "Net cash": "debt",
     Dividend: "dividend/buyback",
     Buyback: "dividend/buyback",
   };
@@ -105,10 +119,10 @@
   const BELOW_ESTIMATE = new RegExp(String.raw`\b(?:missed|misses|missing)\b|\b(?:below|short of|behind)\s+(?:[\w-]+\s+){0,2}?` + ESTIMATE_NOUN + String.raw`\b`, "i");
   // Sentiment: which way is good, for canonical metrics only.
   const UP_IS_GOOD = new Set([
-    "Revenue", "Gross profit", "Operating income", "Net income", "Profit", "Earnings", "EPS", "Gross margin",
+    "Revenue", "EBITDA", "EBIT", "Net margin", "Net cash", "Gross profit", "Operating income", "Net income", "Profit", "Earnings", "EPS", "Gross margin",
     "Operating margin", "Margin", "Free cash flow", "Operating cash flow", "Cash", "Dividend", "Buyback",
   ]);
-  const UP_IS_BAD = new Set(["Operating expenses", "Debt"]);
+  const UP_IS_BAD = new Set(["Operating expenses", "Debt", "Net debt"]);
   const NEUTRAL_METRIC = new Set(["Capital expenditure"]);
 
   const CURRENCY_SYMBOL = { USD: "$", GBP: "£", EUR: "€", JPY: "¥", INR: "₹", CAD: "C$", AUD: "A$", HKD: "HK$" };
@@ -802,6 +816,12 @@
   function buildFacts(targets, blocks, context = {}) {
     const units = targets.flatMap((t) => t.units || []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const pagePeriod = context.pagePeriod !== undefined ? context.pagePeriod : dominantPeriod(units);
+    // The page's texts (or, without blocks, the units'), for its company and period end dates.
+    // context.page: { title, jsonld, meta } read from the page by extract.js.
+    const texts = (blocks || []).length ? blocks.map((b) => b.text) : units.map((u) => u.blockText || u.text);
+    const pageInfo = context.page || {};
+    const page = pageIdentity({ ...pageInfo, texts });
+    const ends = periodEnds(texts, pageInfo.title || "");
     // Does the page write falls as "(3)%" or "-3%" in its tables? Then an unsigned change is a rise.
     const negativesShown =
       context.negativesShown !== undefined
@@ -887,7 +907,16 @@
       const roleOk = f.role === "level" || f.role === "guidance" || (f.role === "change" && !f.linkedTo);
       f.showOnCard = f.labelConfidence !== "low" && roleOk && !f.priorPeriod;
       const prior = resolve(f._priorOf);
-      if (prior && prior.period) f.prior = { display: prior.display, period: prior.period.text };
+      if (prior && prior.period) f.prior = { display: prior.display, period: prior.period.text, value: prior.value, unit: unitOf(prior) };
+      // For exports: the metric on its own ("Operating income", with "non-GAAP" in qualifiers),
+      // its unit, the period's end date, and the company (the sentence's own, else the page's).
+      // A low-confidence label is a snippet of text, not a metric: no metric then.
+      f.metric = f.labelConfidence === "low" ? null : f._base || f.label;
+      f.unit = unitOf(f);
+      f.periodEnd = periodEndFor(f.periodInferred ? null : f.period, ends);
+      const own = companyIn(f.sentence);
+      f.company = own ? own.company : page.company;
+      f.ticker = own ? own.ticker : page.ticker;
     }
     const internal = new Set(["kind", "perShare", "signed"]);
     return kept.map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_") && !internal.has(k))));
@@ -900,7 +929,7 @@
   const VISIBLE_ROWS = 7;
   // Importance on the card: headline metrics by topic, then guidance, then segment figures
   // ("Data Center revenue"), then everything else.
-  const TOPIC_ORDER = ["revenue/sales", "gross profit", "operating income", "net income", "EPS/per share", "margin", "cash flow"];
+  const TOPIC_ORDER = ["revenue/sales", "gross profit", "operating income", "EBIT/EBITDA", "net income", "EPS/per share", "margin", "cash flow", "debt"];
   const isSegment = (q) => /^[A-Z]/.test(q) && !/^(?:GAAP|non-GAAP)$/.test(q);
 
   function cardRank(f) {
@@ -1023,7 +1052,211 @@
     return words.direction || null;
   }
 
-  const FrogbotFacts = { buildFacts, dominantPeriod, cardRows, metricNear, directionNear };
+  // ---------------------------------------------------------------------------
+  // The page's company and ticker, and period end dates
+  // ---------------------------------------------------------------------------
+
+  const EXCHANGE = String.raw`(?:NASDAQ|Nasdaq|NYSE(?:\s+(?:American|Arca|MKT))?|AMEX|LSE|LON|TSX(?:-V)?|ASX|OTC(?:QX|QB)?|Euronext|XETRA|HKEX|SGX|NSE|BSE|TSE|JSE)`;
+  const TICKER = String.raw`[A-Z][A-Z0-9]{0,5}(?:\.[A-Z]{1,2})?`;
+  // "(NASDAQ: NVDA)", "Nasdaq: AAPL", "LSE: BP."
+  const EXCHANGE_TICKER = new RegExp(String.raw`\(?\b${EXCHANGE}\s*:\s*(${TICKER})(?![a-z])\.?\)?`, "g");
+  // "Meta Platforms (META)": a name in capitals followed by a bare ticker.
+  const NAME_WORD = String.raw`(?:[A-Z][\w&'’.-]*|&|and|of|plc|p\.l\.c\.|inc\.?|ltd\.?|corp\.?|co\.)`;
+  const NAMED_TICKER = new RegExp(String.raw`([A-Z][\w&'’.-]*(?:,?\s+${NAME_WORD})*)\s*\((${TICKER})\)`, "g");
+  // Capitals in brackets that aren't tickers.
+  const NOT_TICKER = /^(?:GAAP|EPS|CEO|CFO|COO|CTO|AI|US|USA|UK|EU|USD|GBP|EUR|IPO|ETF|ESG|R&D|LLC|LP|PLC|NA|N\/A|FY|Q[1-4]|H[12]|YOY|TTM|EBITDA?|EBIT|FCF|ADR|SEC|IRS|FED|OPEC|GDP|CPI|PCE)$/;
+  const NAME_BEFORE = new RegExp(String.raw`([A-Z][\w&'’.-]*(?:,?\s+${NAME_WORD})*)\s*$`);
+  // Words before a name that aren't part of it: "Shares of Coca-Cola", "The Company".
+  const NAME_STOP = /^(?:(?:The|Shares|Stock|Company|Today|On|of)\s+)+/;
+
+  const cleanName = (name) => collapse(name).replace(NAME_STOP, "").replace(/,$/, "");
+  const tickerOf = (s) => (s || "").replace(/\.$/, "").toUpperCase();
+
+  // Companies named with a ticker in a text: [{ name, ticker, exchange }].
+  function tickersIn(text) {
+    const found = [];
+    for (const m of text.matchAll(EXCHANGE_TICKER)) {
+      const before = text.slice(Math.max(0, m.index - 80), m.index);
+      const name = (before.match(NAME_BEFORE) || [])[1];
+      found.push({ name: name ? cleanName(name) : null, ticker: tickerOf(m[1]), exchange: true });
+    }
+    for (const m of text.matchAll(NAMED_TICKER)) {
+      if (NOT_TICKER.test(m[2]) || found.some((f) => f.ticker === m[2])) continue;
+      found.push({ name: cleanName(m[1]), ticker: m[2], exchange: false });
+    }
+    return found;
+  }
+
+  // The page's company and ticker: { company, ticker, confidence } from, in order, exchange
+  // tickers in the text ("(NASDAQ: NVDA)"), structured data (JSON-LD with a ticker symbol, or an
+  // article "about" one company; never the publisher), and a "<Company> Reports ... Results"
+  // title. When several companies are equally likely, both are left blank rather than guessed.
+  // page: { texts, title, jsonld: [objects], meta: { name: content } }.
+  function pageIdentity(page = {}) {
+    const texts = page.texts || [];
+    const title = collapse(page.title || "");
+    const blank = { company: null, ticker: null, confidence: null };
+    const titleName = () => {
+      const bare = title.split(/\s+[|–—-]\s+/)[0];
+      return bare && bare.split(" ").length <= 4 ? bare : null;
+    };
+
+    // 0. A company infobox describes the page's own subject: its "Traded as" row's first ticker
+    //    ("Nasdaq: NVDA"), with the infobox's name, else the title's.
+    const box = page.infobox;
+    const boxed = box && box.tradedAs ? [...box.tradedAs.matchAll(EXCHANGE_TICKER)] : [];
+    if (boxed.length) return { company: box.name || titleName(), ticker: tickerOf(boxed[0][1]), confidence: "medium" };
+
+    // 1. Exchange tickers in the text.
+    const counts = new Map();
+    for (const text of texts) {
+      for (const t of tickersIn(text).filter((x) => x.exchange)) {
+        const entry = counts.get(t.ticker) || { ticker: t.ticker, name: null, count: 0 };
+        entry.count += 1;
+        entry.name = entry.name || t.name;
+        counts.set(t.ticker, entry);
+      }
+    }
+    if (counts.size) {
+      const ranked = [...counts.values()].sort((a, b) => b.count - a.count);
+      if (ranked[1] && ranked[1].count === ranked[0].count) return blank;
+      const top = ranked[0];
+      const name = top.name || titleName();
+      return { company: name || null, ticker: top.ticker, confidence: top.name ? "high" : "medium" };
+    }
+
+    // 2. Structured data: a company with a ticker symbol, or the one company an article is about.
+    const objects = [];
+    const walk = (o) => {
+      if (!o || typeof o !== "object") return;
+      if (Array.isArray(o)) return o.forEach(walk);
+      objects.push(o);
+      if (o["@graph"]) walk(o["@graph"]);
+    };
+    walk(page.jsonld || []);
+    const types = (o) => [].concat(o["@type"] || []).map(String);
+    const withTicker = objects.filter((o) => o.tickerSymbol && o.name);
+    const about = objects
+      .filter((o) => types(o).some((t) => /Article|NewsArticle|Report/.test(t)))
+      .flatMap((o) => [].concat(o.about || []))
+      .filter((o) => o && typeof o === "object" && types(o).some((t) => /Organization|Corporation/.test(t)) && o.name);
+    const structured = withTicker.length ? withTicker : about;
+    const names = [...new Set(structured.map((o) => collapse(o.name)))];
+    if (names.length === 1) {
+      const o = structured[0];
+      const ticker = o.tickerSymbol ? tickerOf(String(o.tickerSymbol).split(/[\s:]+/).pop()) : null;
+      return { company: names[0], ticker, confidence: "medium" };
+    }
+    if (names.length > 1) return blank;
+    const meta = page.meta || {};
+    const metaTicker = meta.ticker || meta["stock-ticker"] || meta["og:ticker"];
+    if (meta.company || metaTicker) return { company: meta.company || null, ticker: metaTicker ? tickerOf(metaTicker) : null, confidence: "medium" };
+
+    // 3. The title: "NVIDIA Announces Financial Results for ...", "Apple reports fourth quarter results".
+    const m = title.match(/^(.+?)\s+(?:announces|reports|posts|delivers|releases|reveals)\b.*\b(?:results|earnings)\b/i);
+    if (m) return { company: cleanName(m[1]), ticker: null, confidence: "low" };
+    return blank;
+  }
+
+  // The company a sentence itself names with a ticker ("Meta Platforms (META) earnings ..."), if
+  // it names exactly one.
+  function companyIn(text) {
+    const found = tickersIn(text || "");
+    const tickers = [...new Set(found.map((f) => f.ticker))];
+    if (tickers.length !== 1) return null;
+    const named = found.find((f) => f.name) || found[0];
+    return { company: named.name, ticker: tickers[0] };
+  }
+
+  const MONTH = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
+  const MONTH_NAME = String.raw`(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?`;
+  const DATE_TEXT = String.raw`(?:${MONTH_NAME}\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+${MONTH_NAME}\s+\d{4})`;
+  const ENDED = new RegExp(
+    String.raw`\b(?:(first|second|third|fourth)\s+(?:fiscal\s+)?quarter|(three|six|nine|twelve)\s+months|(fiscal\s+year|year))\s+(?:ended|ending)(?:\s+on)?\s+(${DATE_TEXT})`,
+    "gi"
+  );
+
+  // "July 27, 2025" / "27 July 2025" -> "2025-07-27".
+  function isoDate(text) {
+    const t = collapse(text).replace(/\./g, "");
+    let m = t.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+    let month;
+    let day;
+    let year;
+    if (m) [, month, day, year] = m;
+    else {
+      m = t.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+      if (!m) return null;
+      [, day, month, year] = m;
+    }
+    const key = Object.keys(MONTH).find((k) => k.startsWith(month.toLowerCase().slice(0, 3)));
+    if (!key) return null;
+    return `${year}-${String(MONTH[key]).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  // The quarter and year a period names: "Q2 FY26" -> { quarter: 2, fiscal: 2026 },
+  // "Q3 2026" -> { quarter: 3, year: 2026 }, "second quarter" -> { quarter: 2 }.
+  function periodParts(text) {
+    const t = collapse(text).toLowerCase();
+    const q = t.match(/\bq([1-4])\b/) || t.match(/\b(first|second|third|fourth)[\s-]+(?:fiscal\s+)?quarter\b/);
+    const fy = t.match(/\bfy\s*['’]?(\d{4}|\d{2})\b/) || t.match(/\bfiscal(?:\s+year)?\s+(\d{4})\b/);
+    const year = t.match(/\b((?:19|20)\d{2})\b/);
+    const toYear = (y) => (y.length === 2 ? 2000 + Number(y) : Number(y));
+    return {
+      quarter: q ? Number(q[1]) || ORDINAL_QUARTER[q[1]] : null,
+      fiscal: fy ? toYear(fy[1]) : null,
+      year: !fy && year ? Number(year[1]) : null,
+      months: /\b(?:three|six|nine|twelve)\s+months\b/.test(t),
+    };
+  }
+
+  // "Quarter ended July 27, 2025" phrases on the page: [{ quarter, year (of the end date),
+  // fiscal (from the same sentence, or a title naming the same quarter), date }].
+  function periodEnds(texts, title = "") {
+    const out = [];
+    const titleParts = periodParts(title || "");
+    for (const text of texts) {
+      for (const m of text.matchAll(ENDED)) {
+        const date = isoDate(m[4]);
+        if (!date) continue;
+        const quarter = m[1] ? ORDINAL_QUARTER[m[1].toLowerCase()] : m[2] && m[2].toLowerCase() === "three" ? "months" : null;
+        const sentence = text.slice(Math.max(0, m.index - 120), m.index + m[0].length);
+        const own = periodParts(sentence);
+        const fiscal = own.fiscal || (typeof quarter === "number" && titleParts.quarter === quarter ? titleParts.fiscal : null);
+        out.push({ quarter, yearly: Boolean(m[3]) || (m[2] && m[2].toLowerCase() === "twelve"), year: Number(date.slice(0, 4)), fiscal, date });
+      }
+    }
+    return out;
+  }
+
+  // The end date of a fact's period: a date in its own period text ("Three Months Ended July 27,
+  // 2025"), else a matching "quarter ended" phrase from the page (same quarter, and the same
+  // calendar or fiscal year when the period names one; a period with no year matches only when
+  // one phrase fits).
+  function periodEndFor(period, ends) {
+    if (!period) return null;
+    const own = period.text.match(new RegExp(String.raw`\b(?:ended|ending)(?:\s+on)?\s+(${DATE_TEXT})`, "i"));
+    if (own) return isoDate(own[1]);
+    const p = periodParts(period.text);
+    const fits = ends.filter((e) => {
+      if (p.quarter) {
+        if (e.quarter !== p.quarter) return false;
+      } else if (!e.yearly) return false;
+      if (p.fiscal) return e.fiscal === p.fiscal;
+      if (p.year) return e.year === p.year || e.fiscal === p.year;
+      return true;
+    });
+    const dates = [...new Set(fits.map((e) => e.date))];
+    return dates.length === 1 ? dates[0] : null;
+  }
+
+  // The unit a figure is measured in, for exports.
+  function unitOf(f) {
+    if (f.type === "perShare" || (f.type === "money" && f.perShare)) return "per_share";
+    return { money: "money", percent: "percent", basisPoints: "basis_points", multiple: "multiple", count: "count" }[f.type] || f.type;
+  }
+
+  const FrogbotFacts = { buildFacts, dominantPeriod, cardRows, metricNear, directionNear, pageIdentity, periodEnds, periodEndFor, isoDate, symbol };
   if (typeof window !== "undefined" && !window.FrogbotFacts) window.FrogbotFacts = FrogbotFacts;
   if (typeof module !== "undefined" && module.exports) module.exports = FrogbotFacts;
 })();

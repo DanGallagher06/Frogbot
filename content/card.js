@@ -15,6 +15,9 @@
     .card {
       --accent: #2e9d4f;
       --accent-dark: #237a3d;
+      --primary-bg: #237a3d;
+      --primary-fg: #ffffff;
+      --primary-hover: #1b5f30;
       --bg: #ffffff;
       --fg: #1c2a1e;
       --muted: #6b766d;
@@ -55,7 +58,9 @@
     }
     .icon { flex: none; width: 24px; height: 24px; }
     .icon svg { display: block; width: 24px; height: 24px; }
-    .title { flex: 1; margin: 0; font-size: 14px; font-weight: 650; line-height: 1.3; }
+    .titles { flex: 1; min-width: 0; }
+    .title { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.3; }
+    .company { margin: 1px 0 0; font-size: 12px; line-height: 1.3; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     button {
       font: inherit;
       color: inherit;
@@ -234,6 +239,9 @@
       font-weight: 600;
     }
     .action:hover { background: var(--row-hover); }
+    .action.primary { border-color: var(--primary-bg); background: var(--primary-bg); color: var(--primary-fg); }
+    .action.primary:hover { background: var(--primary-hover); }
+    .action.secondary { padding: 4px 6px; border-color: transparent; font-size: 11px; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
     @media (prefers-color-scheme: dark) {
       .card {
         --bg: #1d2420;
@@ -245,6 +253,9 @@
         --bad: #ff7b6e;
         --neutral: #a3aaa5;
         --accent-dark: #3fb865;
+        --primary-bg: #3fb865;
+        --primary-fg: #0d1a11;
+        --primary-hover: #5fd283;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
       }
       .close:hover { background: #237a3d; }
@@ -472,7 +483,11 @@
     icon.setAttribute("aria-hidden", "true");
     icon.innerHTML = FACE_SVG;
     head.appendChild(icon);
-    head.appendChild(el("h2", "title", `Frogbot caught ${facts.length} figure${facts.length === 1 ? "" : "s"}`));
+    const titles = el("div", "titles");
+    titles.appendChild(el("h2", "title", `Frogbot caught ${facts.length} figure${facts.length === 1 ? "" : "s"}`));
+    const who = companyText(options.page);
+    if (who) titles.appendChild(el("p", "company", who));
+    head.appendChild(titles);
     const close = el("button", "close", "×");
     close.type = "button";
     close.setAttribute("aria-label", "Close");
@@ -545,14 +560,18 @@
     const copy = el("button", "action copy", "Copy table");
     copy.type = "button";
     copy.addEventListener("click", async () => {
-      const ok = await copyText(tableText(rows), root);
+      const ok = await copyText(tableText(rows, options.page), root);
       copy.textContent = ok ? "Copied ✓" : "Copy failed";
       copy.focus();
       setTimeout(() => (copy.textContent = "Copy table"), 1500);
     });
-    const download = el("button", "action csv", "Download CSV");
+    const excel = el("button", "action primary xlsx", "Download Excel");
+    excel.type = "button";
+    excel.addEventListener("click", () => downloadXlsx(rows, also, root, options.page));
+    const download = el("button", "action secondary csv", "Download CSV");
     download.type = "button";
-    download.addEventListener("click", () => downloadCsv(rows, also, root));
+    download.addEventListener("click", () => downloadCsv(rows, also, root, options.page));
+    actions.appendChild(excel);
     actions.appendChild(copy);
     if (hasSummary) {
       const copySummary = el("button", "action copy-summary", "Copy summary");
@@ -578,12 +597,21 @@
   const collapse = (s) => (s || "").replace(/\s+/g, " ").trim();
   const changeText = (f) => (f.direction && f.change ? f.change.display.replace(/^[+\-−]/, "") : "");
 
-  // The main table (with the "Show all" rows) as tab-separated text, values as displayed.
-  function tableText(rows) {
+  // "NVIDIA (NVDA)", "NVIDIA", "NVDA" or "": the page's company, for the card's subtitle.
+  function companyText(page) {
+    if (!page) return "";
+    if (page.company && page.ticker) return `${page.company} (${page.ticker})`;
+    return page.company || page.ticker || "";
+  }
+
+  // The main table (with the "Show all" rows) as tab-separated text, values as displayed, with
+  // each row's company first.
+  function tableText(rows, page) {
     const cell = (v) => collapse(String(v ?? "")).replace(/\t/g, " ");
-    const lines = [["Metric", "Figure", "Change", "Direction", "Period"]];
+    const lines = [["Company", "Metric", "Figure", "Change", "Direction", "Period"]];
     for (const { fact: f } of rows) {
-      lines.push([metricText(f), f.display, changeText(f), f.direction || "", f.period ? f.period.text : ""]);
+      const company = f.company || f.ticker ? companyText(f) : companyText(page);
+      lines.push([company, metricText(f), f.display, changeText(f), f.direction || "", f.period ? f.period.text : ""]);
     }
     return lines.map((line) => line.map(cell).join("\t")).join("\n") + "\n";
   }
@@ -613,10 +641,25 @@
     return ok;
   }
 
+  // CSV format version 1, documented column by column in docs/export-format.md. Columns are only
+  // ever added at the end, and a change in meaning bumps format_version.
+  const CSV_VERSION = "1";
   const CSV_COLUMNS = [
-    "section", "metric", "figure", "value", "low", "high", "currency", "type", "role", "change", "direction",
-    "sentiment", "period", "period_inferred", "prior", "source_text", "page_url", "captured_at",
+    "format_version", "company", "ticker", "metric", "qualifiers", "figure", "value", "unit", "currency",
+    "low", "high", "role", "period", "period_end_date", "period_inferred", "label_confidence",
+    "period_confidence", "change_value", "change_unit", "direction", "prior_value", "prior_period",
+    "vs_estimate", "source_text", "page_url", "published_date", "captured_at",
   ];
+  const UNIT = { money: "money", percent: "percent", basisPoints: "basis_points", perShare: "per_share", multiple: "multiple", count: "count" };
+
+  // A plain number Excel reads as a number: no symbols, separators or exponent noise
+  // (482600000, 14.2, 1.24, -3).
+  function plainNumber(v) {
+    if (v == null || v === "" || !Number.isFinite(Number(v))) return "";
+    const n = Number(Number(v).toPrecision(15));
+    if (Math.abs(n) >= 1e21 || (n !== 0 && Math.abs(n) < 1e-6)) return n.toFixed(10).replace(/\.?0+$/, "");
+    return String(n);
+  }
 
   // Quote a field holding a comma, quote or line break, doubling any quotes.
   function csvField(value) {
@@ -624,42 +667,165 @@
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }
 
-  // Every row (main, "Show all" and "Also caught") as CSV, with a UTF-8 BOM so Excel reads
-  // £, € and – correctly.
-  function csvText(rows, also) {
-    const capturedAt = new Date().toISOString();
-    const record = (f, section) => ({
-      section,
-      metric: metricText(f),
+  // One CSV record for a fact. A change's value is signed by its direction (a 3% fall is -3).
+  function csvRecord(f, page, capturedAt) {
+    const change = f.direction && f.change ? f.change : null;
+    let changeValue = change ? Math.abs(change.value) : null;
+    if (change && f.direction === "down") changeValue = -changeValue;
+    if (change && f.direction === "flat") changeValue = 0;
+    const own = f.company || f.ticker;
+    const company = own ? f.company : page && page.company;
+    return {
+      format_version: CSV_VERSION,
+      company,
+      ticker: own ? f.ticker : page && page.ticker,
+      metric: f.metric,
+      // The company has its own column ("Meta Platforms earnings" is qualified by nothing).
+      qualifiers: (f.qualifiers || []).filter((q) => q !== company).join(";"),
       figure: f.display,
-      value: f.value,
-      low: f.low,
-      high: f.high,
+      // A range's midpoint never appears on the page, so a range has only low and high.
+      value: f.low != null && f.high != null ? "" : plainNumber(f.value),
+      unit: f.unit || UNIT[f.type] || f.type,
       currency: f.currency,
-      type: f.type,
+      low: plainNumber(f.low),
+      high: plainNumber(f.high),
       role: f.role,
-      change: f.change ? f.change.display : "",
-      direction: f.direction,
-      sentiment: f.sentiment,
       period: f.period ? f.period.text : "",
+      period_end_date: f.periodEnd,
       period_inferred: f.periodInferred ? "true" : "false",
-      prior: f.prior ? `${f.prior.display} in ${f.prior.period}` : "",
+      label_confidence: f.labelConfidence,
+      period_confidence: f.periodConfidence,
+      change_value: plainNumber(changeValue),
+      change_unit: change ? UNIT[change.type] || change.type : "",
+      direction: f.direction,
+      prior_value: f.prior && f.prior.value != null ? plainNumber(f.prior.value) : "",
+      prior_period: f.prior ? f.prior.period : "",
+      vs_estimate: f.vsEstimate,
       source_text: collapse(f.sentence).slice(0, 200),
       page_url: location.href,
+      published_date: page && page.publishedDate,
       captured_at: capturedAt,
-    });
-    const records = [...rows.map((r) => record(r.fact, "main")), ...also.map((f) => record(f, "also caught"))];
+    };
+  }
+
+  // Every row (main, "Show all" and "Also caught") as CSV, with a UTF-8 BOM so Excel reads
+  // £, € and – correctly.
+  function csvText(rows, also, page) {
+    const capturedAt = new Date().toISOString();
+    const records = [...rows.map((r) => r.fact), ...also].map((f) => csvRecord(f, page, capturedAt));
     const lines = [CSV_COLUMNS.join(","), ...records.map((r) => CSV_COLUMNS.map((c) => csvField(r[c])).join(","))];
     return "\uFEFF" + lines.join("\r\n") + "\r\n";
   }
 
-  // frogbot-<site>-<yyyy-mm-dd>.csv, saved with a Blob and a temporary download link.
-  function downloadCsv(rows, also, container) {
+  // ---- Excel export ----
+
+  // The Excel sheet has the CSV's columns in the same order, apart from "figure": its "value"
+  // column holds the number, with a number format that displays it as the card does ($482.6M,
+  // 14.2%, 40 bps, $1.24, 2.5x). Ranges show low and high, each formatted, with value blank.
+  const XLSX_COLUMNS = CSV_COLUMNS.filter((c) => c !== "figure");
+  const MAX_WIDTH = 40;
+  const WIDE = { source_text: 60 }; // wrapped, at this width
+  const MONEY_SCALE = [
+    [1e12, ",,,,", "T"],
+    [1e9, ",,,", "B"],
+    [1e6, ",,", "M"],
+  ];
+
+  const quoted = (s) => `"${s}"`;
+  // The decimal places a displayed figure uses ("$54.0B" -> 1, "$1.24" -> 2, "14%" -> 0).
+  const decimalsIn = (text) => {
+    const m = String(text || "").match(/\d[\d,]*(?:\.(\d+))?/);
+    return m && m[1] ? m[1].length : 0;
+  };
+  const digits = (decimals) => (decimals ? `0.${"0".repeat(decimals)}` : "0");
+
+  // An Excel cell for a number in a unit, formatted like `shown` (how the card displays it):
+  // { value, format, text }. Negative numbers show the card's "−"; "+" stays where it's shown.
+  function formattedCell(value, unit, currency, shown) {
+    if (value == null || !Number.isFinite(Number(value))) return null;
+    const d = digits(decimalsIn(shown));
+    const sym = quoted(window.FrogbotFacts.symbol(currency) || "");
+    let v = Number(value);
+    let pos;
+    if (unit === "money") {
+      const scale = MONEY_SCALE.find(([at]) => Math.abs(v) >= at);
+      pos = scale ? `${sym}#,##${d}${scale[1]}"${scale[2]}"` : `${sym}#,##${d}`;
+    } else if (unit === "per_share") pos = `${sym}#,##0.00`;
+    else if (unit === "percent") {
+      v /= 100; // Excel keeps percentages as fractions
+      pos = `${d}%`;
+    } else if (unit === "basis_points") pos = `${d}" bps"`;
+    else if (unit === "multiple") pos = `${d}"x"`;
+    else pos = d; // counts show no thousands separator on the card either
+    const plus = /^\+/.test(String(shown || "").trim()) ? '"+"' : "";
+    const format = `${plus}${pos};"−"${pos};${pos}`;
+    return { value: Number(v.toPrecision(15)), format, text: String(shown || value) };
+  }
+
+  // A range's display split into its ends ("$505M–$525M" -> ["$505M", "$525M"]).
+  const rangeEnds = (display) => String(display || "").split(/\s*[–—]\s*|\s+to\s+/);
+  // The figure alone, without a guidance tolerance ("$54.0B ±2%" -> "$54.0B").
+  const figureOnly = (display) => String(display || "").split(/\s+±/)[0];
+
+  function xlsxRow(f, page, capturedAt) {
+    const r = csvRecord(f, page, capturedAt);
+    const unit = r.unit;
+    const range = f.low != null && f.high != null;
+    const [lowShown, highShown] = rangeEnds(f.display);
+    const change = f.direction && f.change ? f.change : null;
+    const cells = {
+      format_version: Number(CSV_VERSION),
+      value: range ? null : formattedCell(f.value, unit, f.currency, figureOnly(f.display)),
+      low: range ? formattedCell(f.low, unit, f.currency, lowShown) : null,
+      high: range ? formattedCell(f.high, unit, f.currency, highShown) : null,
+      change_value: change && r.change_value !== "" ? formattedCell(Number(r.change_value), r.change_unit, f.currency, change.display) : null,
+      prior_value: f.prior && r.prior_value !== "" ? formattedCell(f.prior.value, f.prior.unit || unit, f.currency, f.prior.display) : null,
+      period_end_date: r.period_end_date ? { date: r.period_end_date, text: r.period_end_date } : null,
+      published_date: r.published_date ? { date: r.published_date, text: r.published_date } : null,
+      captured_at: { dateTime: r.captured_at, text: "2026-01-01 00:00:00" },
+    };
+    return XLSX_COLUMNS.map((c) => (c in cells ? cells[c] : r[c] == null || r[c] === "" ? null : String(r[c])));
+  }
+
+  // Every row (main, "Show all" and "Also caught") as an .xlsx file's bytes.
+  function xlsxBytes(rows, also, page) {
+    const capturedAt = new Date().toISOString();
+    const data = [...rows.map((r) => r.fact), ...also].map((f) => xlsxRow(f, page, capturedAt));
+    // Widths fitted to the longest text in each column (and the header, plus room for its
+    // filter button), up to a maximum; source_text wraps at a fixed width.
+    const columns = XLSX_COLUMNS.map((header, i) => {
+      const longest = data.reduce((most, row) => {
+        const cell = row[i];
+        const text = cell == null ? "" : typeof cell === "object" ? cell.text : String(cell);
+        return Math.max(most, text.length);
+      }, header.length + 3);
+      if (WIDE[header]) return { header, width: Math.min(WIDE[header], longest + 2), wrap: true };
+      return { header, width: Math.min(MAX_WIDTH, Math.max(8, longest + 2)) };
+    });
+    return window.FrogbotXlsx.build({ sheet: "Frogbot", columns, rows: data.map((row) => row.map(stripText)) });
+  }
+  const stripText = (cell) => (cell && typeof cell === "object" ? Object.fromEntries(Object.entries(cell).filter(([k]) => k !== "text")) : cell);
+
+  // frogbot-<site>-<yyyy-mm-dd>.<ext>
+  function exportName(ext) {
     const site = (location.hostname.replace(/^www\./, "") || "local").replace(/[^a-z0-9.-]+/gi, "-");
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
-    const name = `frogbot-${site}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
-    const url = URL.createObjectURL(new Blob([csvText(rows, also)], { type: "text/csv;charset=utf-8" }));
+    return `frogbot-${site}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.${ext}`;
+  }
+
+  function downloadXlsx(rows, also, container, page) {
+    save(new Blob([xlsxBytes(rows, also, page)], { type: window.FrogbotXlsx.MIME }), exportName("xlsx"), container);
+  }
+
+  // frogbot-<site>-<yyyy-mm-dd>.csv.
+  function downloadCsv(rows, also, container, page) {
+    save(new Blob([csvText(rows, also, page)], { type: "text/csv;charset=utf-8" }), exportName("csv"), container);
+  }
+
+  // Saves a Blob with a temporary download link.
+  function save(blob, name, container) {
+    const url = URL.createObjectURL(blob);
     const link = el("a");
     link.href = url;
     link.download = name;
