@@ -39,9 +39,11 @@ lighter italics, and an unclear direction gets no arrow.
 
 ## Privacy
 
-Frogbot runs entirely in your browser, and only on the tab where you click it. It has no
-background script, makes no network requests of its own, and sends no data anywhere. Downloaded
-CSV files are saved straight to your computer.
+Frogbot runs entirely in your browser, and only on the tab where you click it (or press its
+shortcut). Its background service worker does two things only: it opens the welcome page once,
+when Frogbot is first installed, and it handles the keyboard shortcut. Frogbot makes no network
+requests of its own and sends no data anywhere. Downloaded Excel and CSV files are saved straight
+to your computer.
 
 The AI summary uses the model built into Edge and Chrome (the Summarizer API), which runs on
 your own computer: the article never leaves it, and there are no accounts or API keys. The model
@@ -49,13 +51,14 @@ itself is a one-time download by the browser, which only starts when you click "
 (one-time download)" on the card. You can turn the AI summary off in the popup ("Use on-device
 AI"); then Frogbot makes no AI calls at all and uses its built-in summary.
 
-It asks for three permissions:
+It asks for three permissions (the welcome page, demo page, keyboard shortcut and options page
+need no others):
 
 | Permission | Why |
 | --- | --- |
-| `activeTab` | Access to the current tab only, and only after you click the extension. |
+| `activeTab` | Access to the current tab only, and only after you click the extension or press its shortcut. |
 | `scripting` | To add the frog, the highlights and the card to that tab. |
-| `storage` | To remember your settings locally: the debug view, the AI summary switch, and whether the summary is open. |
+| `storage` | To remember your settings locally: the debug view, the AI summary switch, whether the summary is open, and that the welcome page has been shown. |
 
 ## Install
 
@@ -75,13 +78,38 @@ Frogbot isn't in an extension store yet; load it from this folder.
 3. Click **Load unpacked** and select this `frogbot` folder.
 4. Optional: pin Frogbot from the extensions (puzzle-piece) menu.
 
-Then open a finance article, click the Frogbot icon and press **Release the frog**. Press
-**Escape**, or the card's **×**, to remove the frog, the card and every highlight; the page is
-restored exactly as it was.
+Then open a finance article, click the Frogbot icon and press **Release the frog**, or press
+**Alt+Shift+F**. Press **Escape**, or the card's **×**, to remove the frog, the card and every
+highlight; the page is restored exactly as it was.
 
-To try it on the included sample page, turn on **Allow access to file URLs** on Frogbot's
-details page, then open `test-pages/earnings-sample.html` (a fictional company's earnings
-release) in a tab.
+## First run
+
+- **Welcome page.** When Frogbot is first installed it opens `pages/welcome.html` once (never
+  on updates, reloads or browser restarts; a stored flag makes sure): what Frogbot does, with
+  the demo GIF; how to pin it (drawn in SVG); a **Try it now** button; how to use it on real
+  pages; privacy in two lines; and links to GitHub, Issues and the export format. The popup's
+  **Help** link opens it again.
+- **Demo page.** `pages/demo.html` is the fictional Lilypad Holdings earnings release, packaged
+  inside the extension, so it works without "Allow access to file URLs". Extension pages can't
+  have scripts injected into them, so the demo has its own **Release the frog** button, which
+  loads the same content scripts, in the same order and with the same settings, as a normal
+  release (frog, highlights, card, summary and exports all work there). The popup's button and
+  the shortcut work on it too. It's built from `test-pages/earnings-sample.html`, which stays
+  the test fixture: run `python tools/build_demo.py` after changing the test page (the
+  extension suite fails if the demo is out of date).
+- **Keyboard shortcut.** **Alt+Shift+F** releases the frog, exactly as the popup's button does
+  (both use `shared/release.js`). It doesn't clash with Chrome's, Edge's or Windows' own
+  shortcuts. Change it on the extensions page under "Keyboard shortcuts"; the popup, the
+  welcome page and the options page always show the current one. On pages Frogbot can't run on
+  (the browser's own pages, the web store) it does nothing.
+- **Popup.** The frog-face header, **Release the frog**, the shortcut, the **Use on-device AI**
+  switch with its availability note, **Help** and **Report a problem** links, and the version.
+- **Options page** ("Extension options" on the extensions page). The keyboard shortcut, and a
+  **Developer** section with **Show what Frogbot reads** (the debug view: block outlines and
+  console tables), which used to be in the popup. The stored setting is the same.
+
+To run Frogbot on files saved to your computer (such as `test-pages/earnings-sample.html`),
+turn on **Allow access to file URLs** on Frogbot's details page.
 
 ## How it works
 
@@ -184,8 +212,9 @@ Held-out accuracy: to be measured.
   figure's block instead).
 - Detect numbers during extraction, so scoring doesn't compute them a second time. Scoring
   takes about 30ms on a big earnings release, which is acceptable for now. Timings vary with
-  machine load (60-80ms is common on a busy machine), so the browser suite logs the scoring time
-  for information and only fails above 150ms, which would point to a real problem.
+  machine load (60-80ms is common on a busy machine), so the browser suites log the timings for
+  information and only fail above 150ms, which would point to a real problem: the scoring time
+  on Nvidia's release, and getBlocks on the saved Nvidia Wikipedia page (usually 30-50ms).
 - "to" and "from" are loose change words (they match "returned $24.3 billion to
   shareholders" as readily as "rose to $1.2 billion"). Consider counting them only in patterns
   like "from X to Y" or right after a change verb ("rose to", "fell from").
@@ -216,12 +245,19 @@ Held-out accuracy: to be measured.
   - Step 17: EBITDA, EBIT, net debt, net cash and net margin as their own metrics; the page's
     company and ticker (shown under the card's title) and each figure's own; published and
     period end dates; CSV format version 1, documented in `docs/export-format.md`
+  - Step 18 (version 0.3.0): the first-run experience: a welcome page on first install, a
+    built-in demo page, the Alt+Shift+F shortcut, a tidier popup, and an options page for the
+    developer setting
 
 ## Project structure
 
 ```
 manifest.json        MV3 manifest (activeTab, scripting and storage only)
+background.js        Service worker: the welcome page on first install, and the shortcut
+shared/release.js    "Release the frog" on a tab: the files and order used by the popup, the
+                     shortcut and the demo page
 popup/               The toolbar popup with the "Release the frog" button
+pages/               The welcome page, the options page and the built-in demo page
 content/main.js      Entry point injected on click: extracts, picks targets, runs the hops
 content/frog.js      window.Frogbot: the inline-SVG frog, hopping, tongue, show()/remove()
 content/extract.js   window.FrogbotExtract: main-content detection, text blocks, scoring
@@ -258,6 +294,7 @@ tools/               Developer scripts (not part of the extension)
   `tests/snapshots/`; run it with `--update` to save them once you're happy.
 
 The tools need Python 3 and nothing else, apart from one optional script:
+`tools/build_demo.py` rebuilds `pages/demo.html` from the test page.
 `tools/record_demo.py` re-records `docs/demo.gif` and the README screenshots from the test page,
 and needs Selenium and Pillow (`pip install selenium pillow`). It's only needed to update the
 GIF.
@@ -271,6 +308,12 @@ card, and the card's row clicks and exports. They need Selenium, and openpyxl fo
 export checks (`pip install selenium openpyxl`). Where Microsoft Excel is installed, the Excel
 exports are also opened in Excel, which must show every figure as the card does and must not
 need to repair the file; without Excel those checks are skipped.
+
+`test_extension.py` loads Frogbot as an installed extension. Edge and branded Chrome ignore
+`--load-extension` now, so that suite runs in Chrome for Testing, which Selenium Manager
+downloads into its cache the first time (about 200 MB, once; it's skipped if that isn't
+possible). It serves the test pages over http on 127.0.0.1, since the shortcut's `activeTab`
+access doesn't cover `file://` pages.
 
 ```
 python tests/browser/run_all.py            # every suite, with a summary at the end
@@ -290,6 +333,7 @@ python tests/browser/run_all.py --skip-live
 | `test_card_actions.py` | Row clicks and pulses, the keyboard, Copy table, Download CSV, Download Excel (file structure, number formats, dates, widths, frozen header, filters; opened in Excel when it's installed) |
 | `test_summary.py` | The summary on each page, its links, Copy summary, the remembered open/closed state |
 | `test_ai_summary.py` | The AI summary with a stand-in model: every availability state, the download button, checking, fallback, aborting, clean-up |
+| `test_extension.py` | The installed extension in Chrome for Testing: the welcome page (once on install, not on restart, update or reload), the demo's full run, the shortcut (a real key press), the popup, the options page; screenshots of each, light and dark |
 
 They use three kinds of page:
 
@@ -430,7 +474,7 @@ the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, a
   before it).
 - **company** and **ticker**: the company a figure's own sentence names with a ticker
   ("Meta Platforms (META) earnings…"), else the page's. The page's comes from, in order: a
-  company infobox's "Traded as" row (Wikipedia's; read only for this, never scored), exchange
+  company infobox's "Traded as" row (Wikipedia's; reading it doesn't change what's scored), exchange
   tickers in the text ("(NASDAQ: NVDA)", "(NYSE: KO)", "Nasdaq: AAPL", "LSE: BP."),
   with the name written before it; structured data (a JSON-LD company with a `tickerSymbol`, or
   the one organisation a news article is `about`, never its publisher); then a

@@ -1,9 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Frogbot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A little frog that hops down finance articles and highlights the numbers that matter.",
   "permissions": ["activeTab", "scripting", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
@@ -16,6 +19,18 @@
     "default_icon": {
       "16": "assets/icon-16.png",
       "32": "assets/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "pages/options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "release-frog": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Release the frog on this page"
     }
   }
 }

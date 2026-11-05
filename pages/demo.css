@@ -1,0 +1,35 @@
+/* The demo page's bar, above the made-up press release. Frog green, like the card. */
+.demo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 20px;
+  background: #2e9d4f;
+  color: #ffffff;
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.demo-bar img { width: 30px; height: 30px; flex: none; }
+.demo-bar p { flex: 1 1 260px; margin: 0; }
+.demo-button {
+  padding: 9px 18px;
+  border: 2px solid #ffffff;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #1b5f30;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.demo-button:hover { background: #eaf5ec; }
+.demo-button:focus-visible { outline: 2px solid #ffffff; outline-offset: 3px; }
+.demo-button:disabled { opacity: 0.75; cursor: default; }
+.demo-hint { font-size: 13px; opacity: 0.95; }
+.demo-hint kbd {
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 5px;
+  font: 600 12px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
+}

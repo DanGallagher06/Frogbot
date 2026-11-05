@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frogbot options</title>
+  <link rel="icon" href="../assets/icon-32.png">
+  <link rel="stylesheet" href="pages.css">
+  <style>
+    .option { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0 4px; cursor: pointer; font-weight: 600; }
+    .option input { width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+    .option-note { margin: 0 0 0 28px; font-size: 14px; }
+    .foot { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 20px 2px 0; font-size: 14px; }
+    .foot .version { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <header class="band">
+    <img src="../assets/icon.svg" alt="">
+    <div>
+      <h1>Frogbot options</h1>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="section" aria-labelledby="shortcut-heading">
+      <h2 id="shortcut-heading">Keyboard shortcut</h2>
+      <p id="shortcut-text">Release the frog with <kbd class="shortcut">Alt+Shift+F</kbd>.</p>
+      <p class="muted">To change it, open your browser's extensions page, then "Keyboard
+        shortcuts". <a id="shortcuts-link" href="#">Open keyboard shortcuts</a></p>
+    </section>
+
+    <section class="section" aria-labelledby="developer-heading">
+      <h2 id="developer-heading">Developer</h2>
+      <label class="option">
+        <input id="debug" type="checkbox">
+        Show what Frogbot reads
+      </label>
+      <p class="option-note muted">Outlines every block of text Frogbot reads on the page (the
+        main content in red), and logs its scores and fact records to the browser console. For
+        checking why Frogbot picked, or missed, a figure.</p>
+    </section>
+
+    <nav class="foot" aria-label="More">
+      <a id="help" href="welcome.html">Help</a>
+      <a href="https://github.com/DanGallagher06/Frogbot/issues" target="_blank" rel="noopener">Report a problem</a>
+      <span class="muted version"></span>
+    </nav>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,21 +1,21 @@
 const releaseButton = document.getElementById("release");
-const debugCheckbox = document.getElementById("debug");
 const aiSwitch = document.getElementById("use-ai");
 const aiNote = document.getElementById("ai-note");
+const shortcutHint = document.getElementById("shortcut");
 const message = document.getElementById("message");
+
+const ISSUES = "https://github.com/DanGallagher06/Frogbot/issues";
 
 function showMessage(text) {
   message.textContent = text;
   message.hidden = false;
 }
 
-// Remember "Show what Frogbot reads" between popup openings.
-chrome.storage.local.get({ debug: false }).then(({ debug }) => {
-  debugCheckbox.checked = debug;
-});
-debugCheckbox.addEventListener("change", () => {
-  chrome.storage.local.set({ debug: debugCheckbox.checked });
-});
+// Opens a page in a new tab and closes the popup.
+function openTab(url) {
+  chrome.tabs.create({ url });
+  window.close();
+}
 
 // "Use on-device AI": on by default. Being on never downloads anything by itself; the model is
 // only downloaded when the user clicks the button on the card.
@@ -46,47 +46,47 @@ aiSwitch.addEventListener("change", () => {
   aiNote.hidden = state !== "unavailable";
 })();
 
+// The shortcut as it's set now (the user can change or remove it), or a way to add one.
+chrome.commands.getAll().then((commands) => {
+  const command = commands.find((c) => c.name === "release-frog");
+  shortcutHint.replaceChildren();
+  if (command && command.shortcut) {
+    const kbd = document.createElement("kbd");
+    kbd.textContent = command.shortcut;
+    shortcutHint.append("or press ", kbd);
+  } else {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.textContent = "Add a keyboard shortcut";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      openTab("chrome://extensions/shortcuts");
+    });
+    shortcutHint.append(link);
+  }
+  shortcutHint.hidden = false;
+});
+
+document.getElementById("version").textContent = `v${chrome.runtime.getManifest().version}`;
+document.getElementById("help").addEventListener("click", (event) => {
+  event.preventDefault();
+  openTab(chrome.runtime.getURL("pages/welcome.html"));
+});
+document.getElementById("report").addEventListener("click", (event) => {
+  event.preventDefault();
+  openTab(ISSUES);
+});
+
+// The same release as the keyboard shortcut (shared/release.js).
 releaseButton.addEventListener("click", async () => {
   releaseButton.disabled = true;
-
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || tab.id === undefined) {
-      throw new Error("No active tab");
-    }
-
-    const target = { tabId: tab.id };
-    // Same (isolated) world as the content scripts, so main.js can read the flag.
-    await chrome.scripting.executeScript({
-      target,
-      func: (debug, useAI) => {
-        window.__frogbotDebug = debug;
-        window.__frogbotUseAI = useAI;
-      },
-      args: [debugCheckbox.checked, aiSwitch.checked],
-    });
-    await chrome.scripting.insertCSS({ target, files: ["content/frogbot.css"] });
-    await chrome.scripting.executeScript({
-      target,
-      files: [
-        "content/frog.js",
-        "content/highlight.js",
-        "content/extract.js",
-        "content/score.js",
-        "content/facts.js",
-        "content/summary.js",
-        "content/ai-summary.js",
-        "content/xlsx.js",
-        "content/card.js",
-        "content/main.js",
-      ],
-    });
-
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const { ok } = tab && tab.id !== undefined ? await FrogbotRelease.release(tab.id) : { ok: false };
+  if (ok) {
     window.close();
-  } catch (error) {
-    // Restricted pages (chrome://, the Web Store, file:// without access) reject injection.
-    console.warn("Frogbot injection failed:", error);
-    showMessage("Frogbot can't hop on this page.");
-    releaseButton.disabled = false;
+    return;
   }
+  // Restricted pages (the browser's own pages, the web store, file:// without access).
+  showMessage("Frogbot can't hop on this page.");
+  releaseButton.disabled = false;
 });

@@ -31,6 +31,7 @@ SUITES = [
     "test_card_actions.py",
     "test_summary.py",
     "test_ai_summary.py",
+    "test_extension.py",
 ]
 # Known issues (see "Known issues" in the README): BBC can switch to scrolling the article inside
 # a box after the frog appears, so these checks fail on some runs.

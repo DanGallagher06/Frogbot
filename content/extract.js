@@ -764,7 +764,8 @@
   }
 
   // A company infobox (Wikipedia's): its name and its "Traded as" row ("Nasdaq: NVDA"), for the
-  // page's company and ticker only. The infobox is never article text for scoring.
+  // page's company and ticker only. This doesn't change scoring: the infobox's cells are blocks
+  // like any other table's.
   function infobox() {
     const box = document.querySelector("table.infobox");
     if (!box) return null;

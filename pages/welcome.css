@@ -1,0 +1,28 @@
+.demo-gif {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.pin-art { display: block; width: 100%; max-width: 520px; height: auto; margin-top: 12px; }
+.art-window { fill: var(--bg); stroke: var(--line); stroke-width: 2; }
+.art-bar { fill: var(--soft); }
+.art-dot { fill: var(--line); }
+.art-address { fill: var(--surface); stroke: var(--line); }
+.art-menu { fill: var(--surface); stroke: var(--line); stroke-width: 2; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.15)); }
+.art-row { fill: var(--soft); }
+.art-frog { fill: var(--accent); }
+.art-ring { fill: none; stroke: #f2b300; stroke-width: 3; }
+.art-icon { fill: none; stroke: var(--fg); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.art-text { fill: var(--fg); font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+.art-strong { font-weight: 700; }
+.art-muted { fill: var(--muted); font-size: 12.5px; }
+
+.try { text-align: center; }
+.try .button { padding: 16px 30px; font-size: 19px; }
+
+.links { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; margin: 24px 2px 0; }
+.links .version { margin-left: auto; font-size: 13px; }

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Welcome to Frogbot</title>
+  <link rel="icon" href="../assets/icon-32.png">
+  <link rel="stylesheet" href="pages.css">
+  <link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+  <header class="band">
+    <img src="../assets/icon.svg" alt="">
+    <div>
+      <h1>Welcome to Frogbot</h1>
+      <p>Your frog is ready to catch some numbers.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="section hello" aria-labelledby="hello">
+      <h2 id="hello">Hello!</h2>
+      <p>Frogbot is a little frog that hops down finance articles, highlights the numbers that
+        matter and hands you a card with every figure, ready to copy or download.</p>
+      <img class="demo-gif" src="../docs/demo.gif" alt="The frog hopping down an earnings release, highlighting figures, then dropping its card of figures">
+    </section>
+
+    <section class="section" aria-labelledby="pin">
+      <h2 id="pin"><span class="step">1</span> Pin the frog</h2>
+      <p>Click the <strong>Extensions</strong> button (the puzzle piece) in your browser's toolbar,
+        then the <strong>pin</strong> next to Frogbot (in Edge, the eye: "Show in toolbar"). The
+        frog then sits in your toolbar, one click away.</p>
+      <svg class="pin-art" viewBox="0 0 520 190" role="img" aria-labelledby="pin-art-title">
+        <title id="pin-art-title">The browser toolbar: the Extensions puzzle piece is open, showing Frogbot with a pin beside it</title>
+        <rect class="art-window" x="1" y="1" width="518" height="188" rx="12"/>
+        <rect class="art-bar" x="1" y="1" width="518" height="50" rx="12"/>
+        <rect class="art-bar" x="1" y="30" width="518" height="21"/>
+        <circle class="art-dot" cx="24" cy="26" r="6"/><circle class="art-dot" cx="44" cy="26" r="6"/><circle class="art-dot" cx="64" cy="26" r="6"/>
+        <rect class="art-address" x="88" y="13" width="290" height="26" rx="13"/>
+        <text class="art-text" x="106" y="31">example-news.com/earnings</text>
+        <!-- Frogbot's icon, once pinned -->
+        <rect class="art-frog" x="396" y="14" width="24" height="24" rx="6"/>
+        <g transform="translate(398 16) scale(0.83)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+          <circle cx="7" cy="8" r="3.5"/><circle cx="17" cy="8" r="3.5"/><path d="M4.5 14.5c4 4.5 11 4.5 15 0"/>
+        </g>
+        <!-- The puzzle piece, highlighted -->
+        <circle class="art-ring" cx="448" cy="26" r="17"/>
+        <path class="art-icon" d="M441 20h5a3 3 0 1 1 6 0h5v6a3 3 0 1 0 0 6v6h-6a3 3 0 1 0-6 0h-4z"/>
+        <!-- The menu -->
+        <rect class="art-menu" x="268" y="58" width="232" height="112" rx="10"/>
+        <text class="art-text art-strong" x="286" y="84">Extensions</text>
+        <rect class="art-row" x="278" y="98" width="212" height="34" rx="7"/>
+        <rect class="art-frog" x="288" y="104" width="22" height="22" rx="5"/>
+        <g transform="translate(290 106) scale(0.75)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+          <circle cx="7" cy="8" r="3.5"/><circle cx="17" cy="8" r="3.5"/><path d="M4.5 14.5c4 4.5 11 4.5 15 0"/>
+        </g>
+        <text class="art-text" x="320" y="120">Frogbot</text>
+        <circle class="art-ring" cx="468" cy="115" r="14"/>
+        <path class="art-icon" d="M463 108h10l-2 6 3 3h-12l3-3zM468 117v8"/>
+        <text class="art-text art-muted" x="286" y="156">Click the pin to keep it in view</text>
+      </svg>
+    </section>
+
+    <section class="section try" aria-labelledby="try">
+      <h2 id="try"><span class="step">2</span> Try it now</h2>
+      <p>See the frog at work on a made-up earnings release, built into Frogbot.</p>
+      <p><a id="try-it" class="button" href="demo.html">Try it on the demo page</a></p>
+    </section>
+
+    <section class="section" aria-labelledby="use">
+      <h2 id="use"><span class="step">3</span> Use it on real pages</h2>
+      <p>Open any finance article or earnings release, then click the frog in your toolbar and
+        <strong>Release the frog</strong>, or press <kbd class="shortcut">Alt+Shift+F</kbd>.</p>
+      <p class="muted">Works on almost any article or earnings page. It can't run on browser settings
+        pages or the extension store.</p>
+    </section>
+
+    <section class="section" aria-labelledby="privacy">
+      <h2 id="privacy">Privacy</h2>
+      <p>Frogbot only runs on a page when you click it or press its shortcut.<br>
+        Nothing leaves your browser: no accounts, no tracking, and no data sent anywhere.</p>
+    </section>
+
+    <nav class="links" aria-label="More">
+      <a href="https://github.com/DanGallagher06/Frogbot" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/DanGallagher06/Frogbot/issues" target="_blank" rel="noopener">Report a problem</a>
+      <a href="https://github.com/DanGallagher06/Frogbot/blob/main/docs/export-format.md" target="_blank" rel="noopener">Export format</a>
+      <span class="muted version"></span>
+    </nav>
+  </main>
+  <script src="welcome.js"></script>
+</body>
+</html>

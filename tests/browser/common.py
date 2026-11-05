@@ -34,6 +34,7 @@ SCRIPTS = ("frog", "highlight", "extract", "score", "facts", "summary", "ai-summ
 CSS = (ROOT / "content" / "frogbot.css").read_text(encoding="utf-8")
 JS = "\n".join((ROOT / "content" / f"{name}.js").read_text(encoding="utf-8") for name in SCRIPTS)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
+os.environ.setdefault("SE_AVOID_STATS", "true")  # no Selenium Manager usage stats
 SKIP_LIVE = "--skip-live" in sys.argv or bool(os.environ.get("FROGBOT_SKIP_LIVE"))
 
 # name -> (kind, location, options). Saved copies are the browser's "Save page as, complete".

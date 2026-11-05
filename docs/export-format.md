@@ -102,8 +102,9 @@ one sheet, "Frogbot", with the same rows as the CSV, in the same order.
   article is edited continuously after that. So `published_date` is left blank on Wikipedia
   pages (recognised by their address, or by the MediaWiki generator tag on a saved copy).
 - On Wikipedia, the company and ticker come from the infobox's "Traded as" row ("Nasdaq: NVDA";
-  the first ticker when there are several share classes) and the infobox's name. The infobox is
-  only read for this: it isn't article text, so its figures are never scored or highlighted.
+  the first ticker when there are several share classes) and the infobox's name. Reading the
+  row for this doesn't change what Frogbot scores: the infobox's cells are scored like any other
+  table cells, as they were before.
 - Copy table on the card copies the main table as tab-separated text with the columns Company,
   Metric, Figure, Change, Direction and Period, values as displayed, for pasting into a
   spreadsheet by hand. The CSV is the format for anything automated.
