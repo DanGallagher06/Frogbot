@@ -102,6 +102,9 @@ highlight; the page is restored exactly as it was.
   shortcuts. Change it on the extensions page under "Keyboard shortcuts"; the popup, the
   welcome page and the options page always show the current one. On pages Frogbot can't run on
   (the browser's own pages, the web store) it does nothing.
+- **PDFs.** Frogbot can't read PDFs yet. On a PDF (an address ending in .pdf, or any page the
+  browser shows as a PDF) the popup says "Frogbot can't read PDFs yet. Open the HTML version of
+  the page if there is one." and the shortcut does nothing.
 - **Popup.** The frog-face header, **Release the frog**, the shortcut, the **Use on-device AI**
   switch with its availability note, **Help** and **Report a problem** links, and the version.
 - **Options page** ("Extension options" on the extensions page). The keyboard shortcut, and a
@@ -203,6 +206,8 @@ Held-out accuracy: to be measured.
 
 ## Backlog
 
+- Read PDF earnings releases (many companies publish results only as PDFs; Frogbot currently
+  says it can't read them).
 - Pages that scroll the article inside an inner container: position the frog inside that
   container, or follow its scrolling.
 - An optional subtle tint on the chosen sentence, so a figure reads in context. Left out for now
@@ -270,6 +275,7 @@ content/facts.js     window.FrogbotFacts: one record per caught figure (label, p
 content/summary.js   window.FrogbotSummary: the rules summary and the number checker (pure)
 content/ai-summary.js window.FrogbotAI: the on-device AI summary (Summarizer API)
 content/xlsx.js      window.FrogbotXlsx: a small .xlsx writer (zipped XML) for the Excel export
+                     (and the survey workbook: several sheets, formulas, Y/N lists)
 content/card.js      window.FrogbotCard: the summary card, rendered in a shadow root
 content/frogbot.css  Frog and highlight styles (all classes prefixed frogbot-)
 assets/              The frog artwork and the extension icons (with their SVG sources)
@@ -314,6 +320,19 @@ need to repair the file; without Excel those checks are skipped.
 downloads into its cache the first time (about 200 MB, once; it's skipped if that isn't
 possible). It serves the test pages over http on 127.0.0.1, since the shortcut's `activeTab`
 access doesn't cover `file://` pages.
+
+**Real-world survey.** `tests/browser/survey.py` runs Frogbot on saved real pages in
+`test-pages/local/corpus/` (gitignored; a `corpus.json` there can set per-page options) and
+writes `review.xlsx` beside them with Frogbot's own xlsx writer: a Summary sheet (page type,
+currency, company and ticker, blocks, likely junk and missed content, targets, card rows, "Also
+caught", the summary used, console errors, timings, anything visibly broken, a verdict), a Picks
+sheet and a Facts sheet with empty Y/N columns to fill in, and formulas on the Summary sheet that
+turn those answers into precision per page and overall. It also writes `review.json`. It only
+reads what Frogbot does; it changes nothing. `--known` adds the pages the suites already use.
+
+```
+uv run --with selenium python tests/browser/survey.py [--known] [--only page1,page2]
+```
 
 ```
 python tests/browser/run_all.py            # every suite, with a summary at the end

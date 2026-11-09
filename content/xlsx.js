@@ -7,11 +7,14 @@
 //
 // FrogbotXlsx.build({ sheet, columns, rows }) returns the file's bytes (a Uint8Array):
 //   sheet:   the worksheet's name
-//   columns: [{ header, width, wrap }]: width in characters; wrap wraps long text
+//   columns: [{ header, width, wrap, choices }]: width in characters; wrap wraps long text;
+//            choices (["Y", "N"]) makes the column's cells a drop-down list
 //   rows:    [[cell, ...]], one per data row; a cell is null (empty), a string, a number, or
 //            { value: number, format: "Excel number format" } or { date: "YYYY-MM-DD" } or
-//            { dateTime: "ISO 8601 timestamp" }
-// The header row is bold and frozen, with filters on.
+//            { dateTime: "ISO 8601 timestamp" } or { formula: "SUM(A2:A9)", format }
+// FrogbotXlsx.build({ sheets: [{ sheet, columns, rows }, ...] }) writes several sheets.
+// Each sheet's header row is bold and frozen, with filters on. Formulas are calculated by Excel
+// when the file is opened.
 (() => {
   if (window.FrogbotXlsx) return;
 
@@ -100,6 +103,10 @@
   function cellXml(ref, cell, styles, wrap) {
     if (cell == null || cell === "") return "";
     if (typeof cell === "number") return Number.isFinite(cell) ? `<c r="${ref}"><v>${cell}</v></c>` : "";
+    if (typeof cell === "object" && cell.formula != null) {
+      const style = cell.format ? ` s="${styles.forFormat(cell.format)}"` : "";
+      return `<c r="${ref}"${style}><f>${esc(String(cell.formula).replace(/^=/, ""))}</f></c>`;
+    }
     if (typeof cell === "object") {
       let value = cell.value;
       let format = cell.format;
@@ -115,7 +122,7 @@
     return `<c r="${ref}"${style} t="inlineStr"><is><t${space}>${esc(text)}</t></is></c>`;
   }
 
-  function sheetXml({ columns, rows }, styles) {
+  function sheetXml({ columns, rows }, styles, first = true) {
     const last = columnName(columns.length - 1);
     const range = `A1:${last}${rows.length + 1}`;
     const cols = columns
@@ -131,7 +138,7 @@
     return (
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="${NS}" xmlns:r="${REL_NS}">` +
       `<dimension ref="${range}"/>` +
-      '<sheetViews><sheetView tabSelected="1" workbookViewId="0">' +
+      `<sheetViews><sheetView${first ? ' tabSelected="1"' : ""} workbookViewId="0">` +
       '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
       '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>' +
       "</sheetView></sheetViews>" +
@@ -139,17 +146,43 @@
       `<cols>${cols}</cols>` +
       `<sheetData>${header}${body}</sheetData>` +
       `<autoFilter ref="${range}"/>` +
+      validations(columns, rows.length) +
       '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' +
       "</worksheet>"
     );
   }
 
+  // Drop-down lists for columns with choices, on every data row.
+  function validations(columns, rowCount) {
+    const lists = columns
+      .map((c, i) => (c.choices && rowCount ? { i, choices: c.choices } : null))
+      .filter(Boolean)
+      .map(({ i, choices }) => {
+        const col = columnName(i);
+        return `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${col}2:${col}${rowCount + 1}">` +
+          `<formula1>"${esc(choices.join(","))}"</formula1></dataValidation>`;
+      });
+    return lists.length ? `<dataValidations count="${lists.length}">${lists.join("")}</dataValidations>` : "";
+  }
+
+  const sheetName = (name, i) => String(name || `Sheet${i + 1}`).replace(/[\\/?*[\]:]/g, " ").slice(0, 31);
+
   function parts(spec) {
     const styles = styleTable();
-    const sheet = sheetXml(spec, styles); // first, so it registers its number formats
-    const name = esc(String(spec.sheet || "Sheet1").replace(/[\\/?*[\]:]/g, " ").slice(0, 31));
-    const range = `$A$1:$${columnName(spec.columns.length - 1)}$${spec.rows.length + 1}`;
+    const sheets = spec.sheets || [spec];
+    // Sheets first, so they register their number formats.
+    const xmls = sheets.map((sh, i) => sheetXml(sh, styles, i === 0));
+    const names = sheets.map((sh, i) => esc(sheetName(sh.sheet, i)));
+    const formulas = sheets.some((sh) => sh.rows.some((row) => row.some((c) => c && typeof c === "object" && c.formula != null)));
     const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+    const SHEET_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+    const filters = sheets
+      .map((sh, i) => {
+        const range = `$A$1:$${columnName(sh.columns.length - 1)}$${sh.rows.length + 1}`;
+        // Excel's own record of the filter range; it's added on save if missing.
+        return `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${names[i].replace(/'/g, "''")}'!${range}</definedName>`;
+      })
+      .join("");
     return [
       [
         "[Content_Types].xml",
@@ -158,7 +191,7 @@
           '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
           '<Default Extension="xml" ContentType="application/xml"/>' +
           '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+          sheets.map((sh, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="${SHEET_TYPE}"/>`).join("") +
           '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
           "</Types>",
       ],
@@ -174,20 +207,22 @@
         xml +
           `<workbook xmlns="${NS}" xmlns:r="${REL_NS}">` +
           '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="28800" windowHeight="15000"/></bookViews>' +
-          `<sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets>` +
-          // Excel's own record of the filter range; it's added on save if missing.
-          `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${name.replace(/'/g, "''")}'!${range}</definedName></definedNames>` +
+          `<sheets>${names.map((n, i) => `<sheet name="${n}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>` +
+          `<definedNames>${filters}</definedNames>` +
+          (formulas ? '<calcPr calcId="191029" fullCalcOnLoad="1"/>' : "") +
           "</workbook>",
       ],
       [
         "xl/_rels/workbook.xml.rels",
         xml +
           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+          sheets
+            .map((sh, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`)
+            .join("") +
+          `<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
           "</Relationships>",
       ],
-      ["xl/worksheets/sheet1.xml", sheet],
+      ...xmls.map((sheet, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheet]),
       ["xl/styles.xml", styles.xml()],
     ];
   }

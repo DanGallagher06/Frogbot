@@ -81,12 +81,13 @@ document.getElementById("report").addEventListener("click", (event) => {
 releaseButton.addEventListener("click", async () => {
   releaseButton.disabled = true;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const { ok } = tab && tab.id !== undefined ? await FrogbotRelease.release(tab.id) : { ok: false };
+  const { ok, reason } = tab && tab.id !== undefined ? await FrogbotRelease.release(tab.id) : { ok: false };
   if (ok) {
     window.close();
     return;
   }
+  if (reason === "pdf") showMessage("Frogbot can't read PDFs yet. Open the HTML version of the page if there is one.");
   // Restricted pages (the browser's own pages, the web store, file:// without access).
-  showMessage("Frogbot can't hop on this page.");
+  else showMessage("Frogbot can't hop on this page.");
   releaseButton.disabled = false;
 });

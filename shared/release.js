@@ -25,10 +25,28 @@
   const DEFAULTS = { debug: false, useAI: true };
   const settings = () => chrome.storage.local.get(DEFAULTS);
 
-  // Injects Frogbot into a tab. Resolves to { ok: true } or { ok: false, error }: pages Frogbot
-  // can't run on (the browser's own pages, the web store, file:// without access, other
-  // extensions' pages) reject the injection.
+  // Is the tab showing a PDF? Its address ends in .pdf, or its document is one (a PDF served
+  // from an address without .pdf). Frogbot can't read PDFs yet.
+  async function isPdf(tabId) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.url && /\.pdf$/i.test(new URL(tab.url).pathname)) return true;
+    } catch {
+      // No address to go on (or no access to it): ask the document below.
+    }
+    try {
+      const [result] = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.contentType });
+      return Boolean(result && result.result === "application/pdf");
+    } catch {
+      return false;
+    }
+  }
+
+  // Injects Frogbot into a tab. Resolves to { ok: true }, { ok: false, reason: "pdf" } for a
+  // PDF, or { ok: false, error }: pages Frogbot can't run on (the browser's own pages, the web
+  // store, file:// without access, other extensions' pages) reject the injection.
   async function release(tabId) {
+    if (await isPdf(tabId)) return { ok: false, reason: "pdf" };
     try {
       const { debug, useAI } = await settings();
       const target = { tabId };

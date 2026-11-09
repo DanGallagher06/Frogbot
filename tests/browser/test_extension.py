@@ -10,7 +10,8 @@ background.js's handler with a stand-in chrome object, not on updates or reloads
 links, shortcut and version; "Try it now" opening the demo; the demo's full run (frog,
 highlights, card, summary, exports, Escape restoring the page) from its button and from the
 shortcut; the shortcut (a real Alt+Shift+F key press) on an ordinary page served over http, and
-doing nothing on a browser page; the popup (no debug toggle, the shortcut, the version, the
+doing nothing on a browser page; PDF tabs (the shortcut does nothing, the popup says Frogbot
+can't read PDFs yet); the popup (no debug toggle, the shortcut, the version, the
 links); the options page (the debug toggle, stored and used by the next run). Screenshots of each
 page, light and dark, go to test-pages/local/screens/.
 
@@ -48,7 +49,34 @@ STATE = """return { frog: !!document.querySelector('.frogbot-frog'), marks: docu
   any: document.querySelectorAll('[data-frogbot]').length }"""
 
 
+# A one-page PDF with a finance sentence in it, for the PDF notice.
+PDF = b"""%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 55>>stream
+BT /F1 18 Tf 20 70 Td (Revenue rose 12% to $5.2 billion) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+%%EOF
+"""
+
+
 class Quiet(http.server.SimpleHTTPRequestHandler):
+    """The test pages, plus a PDF at /release.pdf and at /pdf-release?id=7 (no .pdf in the
+    address, only its content type says it's a PDF)."""
+
+    def do_GET(self):
+        if self.path.startswith("/release.pdf") or self.path.startswith("/pdf-release"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(PDF)))
+            self.end_headers()
+            self.wfile.write(PDF)
+            return
+        super().do_GET()
+
     def log_message(self, *args):
         pass
 
@@ -331,6 +359,48 @@ def shortcut_checks(ext, base):
         shutil.rmtree(profile, ignore_errors=True)
 
 
+PDF_NOTICE = "Frogbot can't read PDFs yet. Open the HTML version of the page if there is one."
+# In a popup opened as a tab, "the active tab" is the popup itself, so its query is pointed at
+# the other tab (the PDF) before clicking Release.
+POPUP_ON_OTHER_TAB = """const done = arguments[0];
+chrome.tabs.getCurrent(async (me) => {
+  const other = (await chrome.tabs.query({})).find((t) => t.id !== me.id);
+  chrome.tabs.query = async () => [other];
+  document.getElementById('release').click();
+  const end = Date.now() + 5000;
+  const wait = () => { const m = document.getElementById('message');
+    if (!m.hidden || Date.now() > end) done({ shown: !m.hidden, text: m.textContent }); else setTimeout(wait, 100); };
+  wait();
+});"""
+
+
+def pdf_checks(ext, base):
+    """A PDF tab: the shortcut does nothing, and the popup says Frogbot can't read PDFs yet."""
+    profile = tempfile.mkdtemp(prefix="frogbot-ext-")
+    d = make_driver(profile)
+    try:
+        extension_id(d)
+        for path, kind in (("/release.pdf", "a .pdf address"), ("/pdf-release?id=7", "a PDF without .pdf in its address")):
+            show(d, base + path)
+            time.sleep(1)
+            is_pdf = d.execute_script("return document.contentType") == "application/pdf"
+            press_shortcut(d)
+            time.sleep(2.5)
+            nothing = d.execute_script("return !document.querySelector('.frogbot-frog, [data-frogbot]')")
+            report(f"PDF ({kind}): the shortcut does nothing", is_pdf and nothing)
+            pdf_tab = d.current_window_handle
+            d.switch_to.new_window("tab")
+            d.get(f"chrome-extension://{ext}/popup/popup.html")
+            time.sleep(0.5)
+            got = d.execute_async_script(POPUP_ON_OTHER_TAB)
+            report(f"PDF ({kind}): the popup says Frogbot can't read PDFs yet", got["shown"] and got["text"] == PDF_NOTICE, got["text"])
+            d.close()
+            d.switch_to.window(pdf_tab)
+    finally:
+        d.quit()
+        shutil.rmtree(profile, ignore_errors=True)
+
+
 def popup_and_options_checks(ext, base, scheme):
     profile = tempfile.mkdtemp(prefix="frogbot-ext-")
     d = make_driver(profile, scheme)
@@ -411,7 +481,7 @@ def main():
     try:
         groups = [(f, scheme) for scheme in ("light", "dark") for f in (welcome_checks, demo_checks)]
         groups += [(lambda e, s: popup_and_options_checks(e, base, s), "light"), (lambda e, s: popup_and_options_checks(e, base, s), "dark")]
-        groups += [(lambda e, s: shortcut_checks(e, base), "light")]
+        groups += [(lambda e, s: shortcut_checks(e, base), "light"), (lambda e, s: pdf_checks(e, base), "light")]
         for check, scheme in groups:
             try:
                 check(ext, scheme)

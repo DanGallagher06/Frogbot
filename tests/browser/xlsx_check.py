@@ -70,9 +70,9 @@ def structure(path):
             target = os.path.normpath(folder + rel.get("Target")).replace("\\", "/")
             if target not in names:
                 problems.append(f"{name}: relationship to a missing part {target}")
-    sheet = trees.get("xl/worksheets/sheet1.xml")
+    sheets = sorted(n for n in names if n.startswith("xl/worksheets/sheet"))
     styles = trees.get("xl/styles.xml")
-    if sheet is None or styles is None:
+    if not sheets or styles is None:
         return problems + ["missing sheet or styles"]
     xfs = styles.find(f"{S}cellXfs")
     if int(xfs.get("count")) != len(xfs):
@@ -85,26 +85,36 @@ def structure(path):
         n = int(xf.get("numFmtId"))
         if n >= 164 and n not in fmt_ids:
             problems.append(f"cell format uses a missing number format {n}")
+    for name in sheets:
+        problems += _sheet_problems(name, trees[name], len(xfs))
+    return problems
+
+
+def _sheet_problems(name, sheet, style_count):
+    problems = []
     # Worksheet children must come in the schema's order.
-    order = ["sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData", "autoFilter", "pageMargins"]
+    order = ["sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData", "autoFilter", "dataValidations", "pageMargins"]
     seen = [child.tag.replace(S, "") for child in sheet]
     if [t for t in order if t in seen] != [t for t in seen if t in order]:
-        problems.append(f"worksheet elements out of order: {seen}")
+        problems.append(f"{name}: worksheet elements out of order: {seen}")
+    validations = sheet.find(f"{S}dataValidations")
+    if validations is not None and int(validations.get("count")) != len(validations):
+        problems.append(f"{name}: dataValidations count doesn't match")
     last_row = 0
     for row in sheet.iter(f"{S}row"):
         r = int(row.get("r"))
         if r <= last_row:
-            problems.append(f"row {r} out of order")
+            problems.append(f"{name}: row {r} out of order")
         last_row = r
         last_col = 0
         for c in row:
             col, cr = _col_index(c.get("r"))
             if cr != r or col <= last_col:
-                problems.append(f"cell {c.get('r')} out of order in row {r}")
+                problems.append(f"{name}: cell {c.get('r')} out of order in row {r}")
             last_col = col
             s = int(c.get("s", 0))
-            if s >= len(xfs):
-                problems.append(f"cell {c.get('r')} uses a missing style {s}")
+            if s >= style_count:
+                problems.append(f"{name}: cell {c.get('r')} uses a missing style {s}")
             if c.get("t") is None and c.find(f"{S}v") is not None:
                 float(c.find(f"{S}v").text)  # numbers must be numbers
     return problems
