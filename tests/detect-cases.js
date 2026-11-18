@@ -13,6 +13,7 @@
   const year = (raw) => ({ raw, type: "year", value: Number(raw) });
   const count = (raw, value, extra = {}) => ({ raw, type: "count", value, ...extra });
   const bps = (raw, value, extra = {}) => ({ raw, type: "basisPoints", value, ...extra });
+  const pts = (raw, value, extra = {}) => ({ raw, type: "percentagePoints", value, ...extra });
   const junk = (raw, junkReason) => ({ raw, junk: true, junkReason });
 
   const detect = [
@@ -250,8 +251,23 @@
     { source: "nvidia", text: "Revenue is expected to be $54.0 billion, plus or minus 2%.", expected: [money("$54.0 billion", 54000000000), pct("2%", 2)] },
     { source: "nvidia", text: "GAAP and non-GAAP gross margins are expected to be 73.3% and 73.5%, respectively, plus or minus 50 basis points.", expected: [pct("73.3%", 73.3), pct("73.5%", 73.5), bps("50 basis points", 50)] },
     { source: "nvidia", text: "Q2 Fiscal 2026 Summary", expected: [period("Q2 Fiscal 2026", { value: 2026 })] },
-    { source: "nvidia", text: "11.9 pts", expected: [pct("11.9 pts", 11.9)] },
-    { source: "nvidia", text: "(2.7) pts", expected: [pct("(2.7) pts", -2.7, { isNegative: true })] },
+    // ---- Step 19b: split fiscal years, weeks to a date, percentage points, conversions ----
+    { source: "synthetic", text: "Sales in 2026/27 rose.", expected: [period("2026/27", { value: 2027 })] },
+    { source: "synthetic", text: "H1 26/27", expected: [period("H1 26/27", { value: 2027 })] },
+    { source: "synthetic", text: "Guidance for FY 2025/26 is unchanged.", expected: [period("FY 2025/26", { value: 2026 })] },
+    { source: "synthetic", text: "26 weeks to 24 August 2026", expected: [period("26 weeks to 24 August 2026", { value: 2026 })] },
+    { source: "synthetic", text: "For the six months ended June 30, 2026, sales rose.", expected: [period("six months ended June 30, 2026", { value: 2026 })] },
+    // Not a fiscal year: the second year must follow the first, and a bare one needs four digits.
+    { source: "synthetic", text: "The vote was 26/31 in favour.", expected: [count("26", 26), count("31", 31)] },
+    { source: "synthetic", text: "Margin rose 1.4 ppts to 43%.", expected: [pts("1.4 ppts", 1.4), pct("43%", 43)] },
+    { source: "synthetic", text: "Margin fell 2 percentage points.", expected: [pts("2 percentage points", 2)] },
+    { source: "synthetic", text: "Gross margin widened by 0.5pp.", expected: [pts("0.5pp", 0.5)] },
+    { source: "synthetic", text: "The minimum is $250 (£189) at most brokers.", expected: [money("$250", 250), junk("(£189)", "conversion")] },
+    { source: "synthetic", text: "Profit was €1.2bn ($1.3bn) in the quarter.", expected: [money("€1.2bn", 1200000000, { currency: "EUR" }), junk("$1.3bn", "conversion")] },
+    // The same currency in brackets isn't a conversion.
+    { source: "synthetic", text: "Net loss | $250 | ($189)", context: { inTable: true }, expected: [money("$250", 250), money("($189)", -189, { isNegative: true })] },
+    { source: "nvidia", text: "11.9 pts", expected: [pts("11.9 pts", 11.9)] },
+    { source: "nvidia", text: "(2.7) pts", expected: [pts("(2.7) pts", -2.7, { isNegative: true })] },
     { source: "nvidia", text: "$46,743", expected: [money("$46,743", 46743)] },
     { source: "nvidia", text: "2788 San Tomas Expressway, Santa Clara, Calif. 95051", expected: [junk("2788", "address"), junk("95051", "postcode")] },
     { source: "nvidia", text: "There were no H20 sales to China-based customers in the second quarter.", expected: [junk("H20", "model"), period("second quarter")] },
@@ -296,7 +312,7 @@
     { source: "wikipedia", text: "As of January 7, 2025, Nvidia's $3.66 trillion market cap was worth more than double.", expected: [date("January 7, 2025"), money("$3.66 trillion", 3660000000000)] },
     { source: "wikipedia", text: "Nvidia GeForce RTX 2080 Ti, part of the RTX 20 series, uses 256 KB of L2 cache.", expected: [junk("GeForce RTX 2080 Ti", "model"), junk("RTX 20", "model"), count("256", 256), junk("L2", "model")] },
     { source: "bbc", text: "There are about 12,250 data centres around the world, according to Data Center Map.", expected: [count("12,250", 12250)] },
-    { source: "bbc", text: "This year, the tech industry is expected to spend a combined $765bn (£544bn) on AI infrastructure.", expected: [money("$765bn", 765000000000), money("£544bn", 544000000000, { currency: "GBP" })] },
+    { source: "bbc", text: "This year, the tech industry is expected to spend a combined $765bn (£544bn) on AI infrastructure.", expected: [money("$765bn", 765000000000), junk("£544bn", "conversion")] },
     { source: "bbc", text: "Some 16 US states have proposed laws to ban or temporarily block new facilities.", expected: [count("16", 16)] },
   ];
 

@@ -4,7 +4,8 @@ Covers: delivery after the last hop (with the drop animation, or none with reduc
 frog perched on the card, position and size, rows and their order on every page, the Change and
 Period cells, "Show all" / "Show less", "Also caught", the empty state, Escape / × / releasing
 again, keyboard access, clicks outside the card, Shadow DOM isolation from hostile site CSS,
-dark mode contrast, and the narrow-window bottom sheet. Screenshots of every page's card (light
+dark mode contrast, the narrow-window bottom sheet, and keeping clear of cookie bars and sticky
+footers (and not of full-screen dialogs). Screenshots of every page's card (light
 and dark, plus the narrow sheet) go to test-pages/local/screens/ for review.
 
     python tests/browser/test_card.py [--skip-live]
@@ -270,12 +271,66 @@ def narrow_checks():
         d.quit()
 
 
+BARS = r"""const host = document.querySelector('.frogbot-card-host'); const c = host && host.shadowRoot.querySelector('.card');
+const bar = document.getElementById('cookie-bar'); const frog = document.querySelector('.frogbot-frog');
+const r = c ? c.getBoundingClientRect() : null; const f = frog ? frog.getBoundingClientRect() : null;
+return { card: r && { top: r.top, bottom: r.bottom, left: r.left, right: r.right }, bar: bar && bar.isConnected ? bar.getBoundingClientRect().top : null,
+  frog: f && { cy: f.top + f.height / 2, cx: f.left + f.width / 2 }, h: innerHeight, w: innerWidth };"""
+
+
+def bar_checks():
+    """The tables page has a cookie bar fixed along the bottom of the window."""
+    if not available("tables-page"):
+        return
+    for narrow in (False, True):
+        d = make_driver()
+        media(d, "light", reduced=True)
+        where = "narrow window" if narrow else "cookie bar"
+        try:
+            if narrow:
+                d.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {"width": 400, "height": 760, "deviceScaleFactor": 1, "mobile": False})
+            load(d, "tables-page")
+            release(d)
+            wait_for_card(d)
+            time.sleep(0.3)
+            b = d.execute_script(BARS)
+            gap = b["bar"] - b["card"]["bottom"]
+            report(f"{where}: card sits just above the cookie bar", (0 <= gap <= 1) if narrow else (14 <= gap <= 18), f"card bottom {b['card']['bottom']:.0f}, bar top {b['bar']:.0f}")
+            report(f"{where}: frog perched on the lifted card", b["card"]["top"] - 80 < b["frog"]["cy"] < b["card"]["top"] + 10, json.dumps(b["frog"]))
+            if narrow:
+                continue
+            d.save_screenshot(str(SCREENS / "tables-page-cookie-bar.png"))
+            d.execute_script("document.getElementById('cookie-bar').remove()")
+            time.sleep(1.2)
+            b2 = d.execute_script(BARS)
+            report("cookie bar dismissed: card moves back down, the frog with it",
+                   abs(b2["card"]["bottom"] - (b2["h"] - 16)) < 1 and b2["card"]["top"] - 80 < b2["frog"]["cy"] < b2["card"]["top"] + 10,
+                   f"card bottom {b2['card']['bottom']:.0f} of {b2['h']}, frog {b2['frog']}")
+            d.execute_script("const m = document.createElement('div'); m.id = 'modal'; m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2147483647'; document.body.appendChild(m);")
+            time.sleep(1.2)
+            b3 = d.execute_script(BARS)
+            report("full-screen dialog: the card stays where it is, underneath", abs(b3["card"]["bottom"] - b2["card"]["bottom"]) < 1, f"{b3['card']['bottom']:.0f}")
+            d.execute_script("document.getElementById('modal').remove(); const s = document.createElement('div'); s.id = 'sticky'; s.style.cssText = 'position:fixed;right:0;bottom:0;width:420px;height:70px;background:#eee';  document.body.appendChild(s);")
+            time.sleep(1.2)
+            b4 = d.execute_script(BARS)
+            report("sticky footer under the card: card lifts above it", abs((b4["h"] - 70) - b4["card"]["bottom"] - 16) < 1, f"{b4['card']['bottom']:.0f}")
+            d.execute_script("document.getElementById('sticky').style.width = '200px'; document.getElementById('sticky').style.right = 'auto'; document.getElementById('sticky').style.left = '0'")
+            time.sleep(1.2)
+            b5 = d.execute_script(BARS)
+            report("a bar elsewhere along the bottom (not under the card): no lift", abs(b5["card"]["bottom"] - (b5["h"] - 16)) < 1, f"{b5['card']['bottom']:.0f}")
+        except Exception as e:
+            report(f"{where}: run", False, str(e)[:160])
+        finally:
+            d.quit()
+
+
 def main():
     SCREENS.mkdir(parents=True, exist_ok=True)
     test_page_checks()
     isolation_checks()
     page_checks()
     narrow_checks()
+    bar_checks()
     print(f"     screenshots in {SCREENS.relative_to(SCREENS.parents[2])}")
     finish()
 

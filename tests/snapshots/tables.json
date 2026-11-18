@@ -1,0 +1,32 @@
+[
+  {
+    "index": 1,
+    "score": 7,
+    "kind": "sentence",
+    "text": "Operating margin rose 0.4 ppts to 7.6%."
+  },
+  {
+    "index": 2,
+    "score": 5,
+    "kind": "sentence",
+    "text": "Shareholders received £120m ($152m) in dividends during the half."
+  },
+  {
+    "index": 3,
+    "score": 7,
+    "kind": "sentence",
+    "text": "We are raising our full-year capital expenditure guidance to c.£1.1bn (from c.£1"
+  },
+  {
+    "index": 4,
+    "score": 9,
+    "kind": "row",
+    "text": "Group sales | £2,410m | £2,265m | 6.4% | 6.1%"
+  },
+  {
+    "index": 5,
+    "score": 9,
+    "kind": "row",
+    "text": "Adjusted operating profit | £183m | £163m | 12.3% | 11.9%"
+  }
+]

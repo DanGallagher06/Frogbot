@@ -42,6 +42,7 @@ PAGES = {
     "test-page": ("test", "earnings-sample.html", {}),
     "captions-page": ("test", "captions-and-collapsed.html", {}),
     "mapping-page": ("test", "mapping.html", {}),
+    "tables-page": ("test", "tables.html", {}),
     "nvidia-wikipedia": ("saved", "Nvidia - Wikipedia.html", {"source": "https://en.wikipedia.org/wiki/Nvidia"}),
     "apple-wikipedia": ("saved", "Apple Inc. - Wikipedia.html", {"source": "https://en.wikipedia.org/wiki/Apple_Inc."}),
     # The Forbes copy is loaded with its own scripts turned off (they rebuild the page offline).

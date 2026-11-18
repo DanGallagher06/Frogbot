@@ -7,7 +7,7 @@
   const DROP_MS = 250;
   const ARROW = { up: "▲", down: "▼", flat: "▬" };
   const DIRECTION_WORD = { up: "up", down: "down", flat: "flat" };
-  const DOT = { money: "gold", perShare: "gold", percent: "blue", basisPoints: "blue" };
+  const DOT = { money: "gold", perShare: "gold", percent: "blue", basisPoints: "blue", percentagePoints: "blue" };
 
   const STYLE = `
     :host { all: initial; }
@@ -31,10 +31,11 @@
       --grey: #9e9e9e;
       position: fixed;
       right: 16px;
-      bottom: 16px;
+      /* --lift: room left for a cookie bar or sticky footer along the bottom of the window. */
+      bottom: calc(16px + var(--lift, 0px));
       width: 360px;
       max-width: calc(100vw - 32px);
-      max-height: 60vh;
+      max-height: min(60vh, calc(100vh - 32px - var(--lift, 0px)));
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -265,7 +266,7 @@
       .card {
         left: 0;
         right: 0;
-        bottom: 0;
+        bottom: var(--lift, 0px);
         width: auto;
         max-width: none;
         border-radius: 12px 12px 0 0;
@@ -339,7 +340,7 @@
       change.setAttribute("aria-label", `${DIRECTION_WORD[f.direction]}${f.change ? ` ${f.change.display.replace(/^[+\-−]/, "")}` : ""}`);
     }
     // The earlier table column it's compared with.
-    if (f.prior) change.title = `vs ${f.prior.display} in ${f.prior.period}`;
+    if (f.prior) change.title = `vs ${f.prior.display}${f.prior.period ? ` in ${f.prior.period}` : ""}`;
     tr.appendChild(change);
 
     const period = el("td", "period", f.period ? f.period.text : "");
@@ -650,7 +651,10 @@
     "period_confidence", "change_value", "change_unit", "direction", "prior_value", "prior_period",
     "vs_estimate", "source_text", "page_url", "published_date", "captured_at",
   ];
-  const UNIT = { money: "money", percent: "percent", basisPoints: "basis_points", perShare: "per_share", multiple: "multiple", count: "count" };
+  const UNIT = {
+    money: "money", percent: "percent", basisPoints: "basis_points", percentagePoints: "percentage_points",
+    perShare: "per_share", multiple: "multiple", count: "count",
+  };
 
   // A plain number Excel reads as a number: no symbols, separators or exponent noise
   // (482600000, 14.2, 1.24, -3).
@@ -755,6 +759,11 @@
       v /= 100; // Excel keeps percentages as fractions
       pos = `${d}%`;
     } else if (unit === "basis_points") pos = `${d}" bps"`;
+    else if (unit === "percentage_points") {
+      // Points are a change, so a rise always shows its sign: "+1.4 pts".
+      const points = `${d}" pts"`;
+      return { value: Number(v.toPrecision(15)), format: `"+"${points};"−"${points};${points}`, text: String(shown || value) };
+    }
     else if (unit === "multiple") pos = `${d}"x"`;
     else pos = d; // counts show no thousands separator on the card either
     const plus = /^\+/.test(String(shown || "").trim()) ? '"+"' : "";
@@ -864,12 +873,65 @@
     return node;
   }
 
+  // ---- Keeping clear of bars along the bottom of the window ----
+
+  // How far up the card must sit to clear fixed or sticky elements along the bottom of the
+  // window under it (cookie bars, sticky footers). Anything taller than half the window is a
+  // full-screen dialog: the card waits underneath it, as before. Frogbot's own elements are
+  // skipped.
+  const MAX_BAR = 0.5;
+  function bottomBars() {
+    if (!card || !host) return 0;
+    const lift = parseFloat(card.style.getPropertyValue("--lift")) || 0;
+    const r = card.getBoundingClientRect();
+    // The visible area, without a horizontal scrollbar (innerHeight includes it).
+    const h = document.documentElement.clientHeight || window.innerHeight;
+    const w = document.documentElement.clientWidth || window.innerWidth;
+    let top = h;
+    const checked = new Set();
+    for (const fx of [0.05, 0.3, 0.5, 0.7, 0.95]) {
+      const x = Math.min(w - 1, Math.max(0, r.left + r.width * fx));
+      // From the bottom edge up to where the card's bottom would be without any lift.
+      for (const y of [h - 2, h - 12, h - 30, h - 60, h - 100, h - 160]) {
+        if (y < r.bottom + lift - h * MAX_BAR) break;
+        for (const el of document.elementsFromPoint(x, y)) {
+          if (el === host || el.closest("[data-frogbot], .frogbot-card-host")) continue;
+          for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+            if (checked.has(e)) break;
+            checked.add(e);
+            const style = getComputedStyle(e);
+            if (style.position !== "fixed" && style.position !== "sticky") continue;
+            if (style.visibility === "hidden" || Number(style.opacity) === 0) break;
+            const b = e.getBoundingClientRect();
+            if (b.height > h * MAX_BAR || b.width === 0 || b.height === 0) break; // a full-screen dialog
+            if (b.bottom < h - 4) break; // not along the bottom
+            top = Math.min(top, b.top);
+            break;
+          }
+        }
+      }
+    }
+    return Math.max(0, Math.round(h - top));
+  }
+
+  let watch = null;
+  // Moves the card up (or back down) to clear bottom bars; true if it moved.
+  function placeAboveBars() {
+    if (!card) return false;
+    const now = parseFloat(card.style.getPropertyValue("--lift")) || 0;
+    const lift = bottomBars();
+    if (Math.abs(lift - now) < 2) return false;
+    card.style.setProperty("--lift", `${lift}px`);
+    return true;
+  }
+
   window.FrogbotCard = {
     // Renders the card. options.hidden: lay it out invisibly (to measure where the frog
     // should land) until reveal(). options.onClose: the × button. options.onJump(fact,
     // sourceIndex): a row or a summary number was clicked. options.summary: { kind, sentences }
     // from summary.js, shown above the table. options.ai: the AI summary's progress ({ phase,
-    // progress }), and options.onGetAI(): the download button was clicked.
+    // progress }), and options.onGetAI(): the download button was clicked. options.onMove():
+    // the card moved to clear (or stop clearing) a bar along the bottom of the window.
     show(facts, options = {}) {
       this.hide();
       host = makeHost();
@@ -880,6 +942,14 @@
       card = build(facts, options);
       shadow.appendChild(card);
       document.documentElement.appendChild(host);
+      // Clear any cookie bar or sticky footer now, then again whenever the window resizes or a
+      // bar comes or goes; options.onMove() is told so the frog can follow.
+      placeAboveBars();
+      const recheck = () => {
+        if (placeAboveBars() && options.onMove) options.onMove();
+      };
+      watch = { timer: setInterval(recheck, 700), recheck };
+      window.addEventListener("resize", recheck);
       if (!options.hidden) this.reveal(options);
       return card;
     },
@@ -925,6 +995,11 @@
     },
 
     hide() {
+      if (watch) {
+        clearInterval(watch.timer);
+        window.removeEventListener("resize", watch.recheck);
+        watch = null;
+      }
       summaryView = null;
       if (host) host.remove();
       host = null;

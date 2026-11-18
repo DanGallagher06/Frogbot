@@ -242,6 +242,7 @@
         headers: (spec.headers || []).filter(Boolean),
         tableTitle: spec.title || "",
         tableScale: spec.scale || null,
+        tableReconciliation: Boolean(spec.reconciliation),
         heading: spec.heading || null,
         blockIndexes: [i],
         order: i,
@@ -285,6 +286,9 @@
     check("ticker", got.ticker);
     check("periodEnd", got.periodEnd);
     check("priorValue", got.prior ? got.prior.value : null);
+    check("priorOf", got.prior ? `${got.prior.display}${got.prior.period ? ` in ${got.prior.period}` : ""}` : null);
+    check("reconciliation", Boolean(got.reconciliation));
+    check("card", got.showOnCard);
     if ("sentenceStarts" in exp && !got.sentence.startsWith(exp.sentenceStarts)) {
       problems.push(`sentence: expected to start "${exp.sentenceStarts}", got "${got.sentence.slice(0, 40)}"`);
     }

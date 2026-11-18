@@ -37,7 +37,7 @@ The stat card has two downloads with the same rows and columns:
 | 5 | `qualifiers` | What narrows the metric, separated by semicolons: GAAP / non-GAAP, adjusted, diluted, organic, a segment name, a table title. | `non-GAAP;diluted` | Yes |
 | 6 | `figure` | The figure as the card shows it, with its symbol and scale, and a range or tolerance where there is one. | `$46.7B` | No |
 | 7 | `value` | The figure as a plain number in its unit: money in whole currency units, percentages as the percentage (`14.2` for 14.2%), per-share amounts in currency units. Blank for a range: its midpoint never appears on the page, so `low` and `high` hold the ends instead. | `46700000000` | Yes (a range) |
-| 8 | `unit` | What `value` measures: `money`, `percent`, `basis_points`, `per_share`, `multiple` or `count`. | `money` | No |
+| 8 | `unit` | What `value` measures: `money`, `percent`, `basis_points`, `percentage_points`, `per_share`, `multiple` or `count`. | `money` | No |
 | 9 | `currency` | ISO 4217 code for money and per-share figures. | `USD` | Yes (not money) |
 | 10 | `low` | The low end of a range ("$505 million to $525 million"), as a plain number. | `505000000` | Yes (not a range) |
 | 11 | `high` | The high end of a range, as a plain number. | `525000000` | Yes (not a range) |
@@ -48,7 +48,7 @@ The stat card has two downloads with the same rows and columns:
 | 16 | `label_confidence` | How sure Frogbot is of the metric: `high` (a table row header, or a finance term in the figure's own clause), `medium` (with qualifiers or a segment, borrowed from an earlier clause, or guidance), `low` (a snippet). | `high` | No |
 | 17 | `period_confidence` | How sure Frogbot is of the period: `high` (same clause), `medium` (same sentence, table column, list intro or heading), `low` (inferred from the page). | `medium` | Yes (no period) |
 | 18 | `change_value` | The change linked to this figure, as a plain number in `change_unit`, signed by direction: negative for a fall, `0` when unchanged. | `-3.5` | Yes (no linked change) |
-| 19 | `change_unit` | The unit of `change_value`: usually `percent`, sometimes `basis_points` or `money`. | `percent` | Yes |
+| 19 | `change_unit` | The unit of `change_value`: usually `percent`, sometimes `basis_points`, `percentage_points` or `money`. | `percent` | Yes |
 | 20 | `direction` | `up`, `down` or `flat`, when the page makes it plain. | `up` | Yes |
 | 21 | `prior_value` | In a table with current and earlier period columns, the earlier figure this one is compared with, as a plain number in `unit`. | `19937000000` | Yes |
 | 22 | `prior_period` | The period of `prior_value`, as the page writes it. | `Q2 FY25` | Yes |
@@ -76,6 +76,7 @@ one sheet, "Frogbot", with the same rows as the CSV, in the same order.
   | per_share | 1.24 | $1.24 |
   | percent | 0.142 | 14.2% (Excel stores percentages as fractions, so 14.2% is 0.142; the CSV writes 14.2) |
   | basis_points | 40 | 40 bps |
+  | percentage_points | 1.4 | +1.4 pts (always signed: points are a change) |
   | multiple | 2.5 | 2.5x |
   | count | 1250 | 1250 |
 

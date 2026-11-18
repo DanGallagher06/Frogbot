@@ -111,6 +111,11 @@ def main():
             continue
         passed, fails, skipped = counts
         new_fails = fails - known
+        # A suite that crashed still prints its counts on the way out; its exit code says so.
+        if code != 0 and new_fails <= 0:
+            failed = True
+            print(f"{suite:<24} stopped early (exit {code}) after {passed} passed  ({seconds:.0f}s)")
+            continue
         failed = failed or new_fails > 0
         extra = f"  {known} known" if known else ""
         print(f"{suite:<24} {passed:>3} passed  {new_fails:>3} failed  {skipped:>3} skipped{extra}  ({seconds:.0f}s)")

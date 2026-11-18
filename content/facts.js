@@ -73,8 +73,9 @@
   // Headings that are section titles rather than segment names.
   const GENERIC_HEADING = /^(?:highlights?|summary|overview|outlook|results?|financial|quarterly|full[\s-]year|fourth|third|second|first|q[1-4]|recent|business|key|about|forward|conference|cfo|commentary|earnings|segments?|performance|guidance|dividends?|capital|returns?|news|update)\b/i;
 
-  const KEY_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "multiple"]);
+  const KEY_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "percentagePoints", "multiple"]);
   const WHEN_TYPES = new Set(["period", "date", "year"]);
+  const POINTS_OR_PERCENT = new Set(["percent", "basisPoints", "percentagePoints"]);
   const CHANGE_BEFORE =
     /\b(?:up|down|rose|rise|fell|fall|grew|grow|increased?|decreased?|declined?|jumped|climbed|slipped|gained|lost|expanded|contracted|improved|widened|narrowed|dropped|surged|soared|plunged|slid|raised|cut|lowered|boosted|trimmed|by|increase of|decrease of|decline of|growth(?: rate)? of|gain of|drop of|rise of|(?:increase|decrease|decline|growth|gain|drop|rise) (?:was|were|is)(?:\s+at)?)\s+(?:by\s+)?(?:about\s+|approximately\s+|roughly\s+|nearly\s+|almost\s+|more than\s+)?$/i;
   const CHANGE_AFTER = /^\s*(?:(?:year|quarter)[\s-](?:over|on)[\s-](?:year|quarter)|sequential(?:ly)?\b|from\b|higher|lower|increase|decrease|growth|rise|gain|jump|drop|decline)/i;
@@ -97,7 +98,13 @@
   const FLIP_WORD = /^(?:narrowed|narrowing|narrows|widened|widening|widens|eased|easing|eases|moderated|moderating|softened|softening|slowed|slowing|slows|deepened|deepening|accelerated|accelerating|decelerated|decelerating)$/i;
   const NEGATION = /^(?:not|no|never|without|failed|fail|fails|longer|cannot)$|n['’]t$/i;
   // The earlier value in a comparison: "up 14.2% from $422.6 million".
-  const PRIOR_BEFORE = /\b(?:from|compared (?:with|to)|versus|vs\.?|against)\s+(?:about\s+|approximately\s+|roughly\s+|around\s+)?$/i;
+  const PRIOR_BEFORE = /\b(?:from|compared (?:with|to)|versus|vs\.?|against)\s+(?:about\s+|approximately\s+|roughly\s+|around\s+|c\.\s?)?$/i;
+  // "(2025: €21.02 billion)", "(FY 2025/26: £3.1bn)": last year's figure in brackets.
+  const PRIOR_YEAR_LABEL = /\(\s*(?:FY\s?)?(?:19|20)\d{2}(?:\/\d{2})?\s*:\s*$/i;
+  // Words after a value that make it an earlier one: "$1.12 reported a year earlier", "32.0% in
+  // the prior year", "$4.1 billion in the year-ago quarter". The words become its period.
+  const PRIOR_AFTER =
+    /^\s*,?\s*(?:(?:reported|recorded|posted|achieved|delivered)\s+)?(?:(?:in|for|during|over)\s+)?(?:the\s+)?(a\s+year\s+(?:earlier|ago|before)|(?:prior|previous)[\s-](?:year|quarter|period)(?:['’]s)?(?:\s+(?:quarter|period))?|year[\s-]ago(?:\s+(?:quarter|period))?|last\s+year|same\s+(?:quarter|period)\s+(?:last|a)\s+year)\b/i;
   // A table cell showing a fall: "(3)%", "($1.2)", "(2.7) pts", "(62" (some tables put the
   // closing bracket in the next cell), "-3%", "−0.4". Not a footnote marker like "(1)".
   const NEGATIVE_CELL =
@@ -228,7 +235,8 @@
     const found = Score.detectNumbers(text).filter(isPeriodNumber);
     return found.length ? bestPeriod(found, { start: text.length }) : null;
   }
-  const periodKey = (p) => (p ? collapse(p.text).toLowerCase() : "");
+  // "H1 2026/27" and "H1 26/27" are the same period.
+  const periodKey = (p) => (p ? collapse(p.text).toLowerCase().replace(/\b(?:19|20)(\d{2})\/(\d{2})\b/g, "$1/$2") : "");
 
   function symbol(currency) {
     if (!currency) return "";
@@ -253,6 +261,7 @@
     const a = Math.abs(v);
     if (f.type === "percent") return `${sign}${a}%`;
     if (f.type === "basisPoints") return `${sign}${a} bps`;
+    if (f.type === "percentagePoints") return `${sign}${a} pts`;
     if (f.type === "multiple") return `${a}x`;
     return `${sign}${a}`;
   }
@@ -357,6 +366,38 @@
     const tolerances = [];
     const shares = new Set(groups.map((g) => g.figure).filter((n) => n.type === "percent" && SHARE_AFTER.test(text.slice(n.end))));
 
+    // A figure's period: attached / same clause, then elsewhere in the sentence, then the
+    // line that introduces the list, then the nearest heading (or the page title before any
+    // heading), then the page's. Guidance never takes the page's period. Periods in `skip`
+    // belong to another figure (an earlier value's own "in 2024").
+    function assignPeriod(f, group, ci, skip) {
+      const n = group.figure;
+      const usable = periods.filter((p) => !skip.includes(p));
+      const inClause = usable.filter((p) => clauseIndex(ranges, p.start) === ci);
+      const attached = group.extras.filter((x) => isPeriodNumber(x) && !skip.includes(x));
+      const candidates = [...new Set([...attached, ...inClause])];
+      let intro;
+      let heading;
+      f.period = null;
+      f.periodSource = null;
+      if (candidates.length) {
+        f.period = periodOf(bestPeriod(candidates, n));
+        f.periodSource = "clause";
+      } else if (usable.length) {
+        f.period = periodOf(bestPeriod(usable, n));
+        f.periodSource = "sentence";
+      } else if ((intro = periodIn(unit.listIntro))) {
+        f.period = periodOf(intro);
+        f.periodSource = "listIntro";
+      } else if ((heading = periodIn(unit.heading || unit.pageTitle))) {
+        f.period = periodOf(heading);
+        f.periodSource = "heading";
+      } else if (ctx.pagePeriod && f.role !== "guidance") {
+        f.period = { ...ctx.pagePeriod };
+        f.periodSource = "page";
+      }
+    }
+
     groups.forEach((group, gi) => {
       const n = group.figure;
       const ci = clauseIndex(ranges, n.start);
@@ -364,7 +405,7 @@
       const before = text.slice(cs, n.start);
       const after = text.slice(n.end, ce);
       // "plus or minus 2%" on a guidance figure is its tolerance, not a fact of its own.
-      if (isGuidance && gi > 0 && (n.type === "percent" || n.type === "basisPoints") && (/^±/.test(n.raw) || TOLERANCE_BEFORE.test(before))) {
+      if (isGuidance && gi > 0 && POINTS_OR_PERCENT.has(n.type) && (/^±/.test(n.raw) || TOLERANCE_BEFORE.test(before))) {
         tolerances.push({ n, ci });
         return;
       }
@@ -442,31 +483,19 @@
       // introduces the list, then the nearest heading (or the page title before any
       // heading), then the page's. Guidance never takes the page's period: it's usually the
       // quarter just reported, not the one being guided.
-      const inClause = periods.filter((p) => clauseIndex(ranges, p.start) === ci);
-      const attached = group.extras.filter(isPeriodNumber);
-      const candidates = [...new Set([...attached, ...inClause])];
-      let intro;
-      let heading;
-      if (candidates.length) {
-        f.period = periodOf(bestPeriod(candidates, n));
-        f.periodSource = "clause";
-      } else if (periods.length) {
-        f.period = periodOf(bestPeriod(periods, n));
-        f.periodSource = "sentence";
-      } else if ((intro = periodIn(unit.listIntro))) {
-        f.period = periodOf(intro);
-        f.periodSource = "listIntro";
-      } else if ((heading = periodIn(unit.heading || unit.pageTitle))) {
-        f.period = periodOf(heading);
-        f.periodSource = "heading";
-      } else if (ctx.pagePeriod && f.role !== "guidance") {
-        f.period = { ...ctx.pagePeriod };
-        f.periodSource = "page";
-      }
+      assignPeriod(f, group, ci, []);
 
       // Direction: an explicit sign, a change word, or "from $X to $Y". The earlier value in
-      // a comparison has none of its own.
-      f._prior = f.role === "level" && PRIOR_BEFORE.test(near);
+      // a comparison has none of its own: "versus 32.0%", "up from $4.8 billion", "(2025: X)",
+      // "(from £1.6bn)" (an earlier guidance figure), "$1.12 reported a year earlier".
+      const priorWords = gi > 0 ? nearAfter.match(PRIOR_AFTER) : null;
+      // "(2025: " is split from the figure by the clause break at the colon, so look back past it.
+      const lookBack = text.slice(Math.max(0, n.start - 30), n.start);
+      const yearLabel = lookBack.match(PRIOR_YEAR_LABEL);
+      f._prior = (f.role === "level" || f.role === "guidance") && (PRIOR_BEFORE.test(near) || Boolean(yearLabel) || Boolean(priorWords));
+      f._priorWhen = priorWords ? collapse(priorWords[1]) : null;
+      // The label's year is the earlier value's own period.
+      f._priorLabel = yearLabel ? periods.filter((p) => p.start >= n.start - yearLabel[0].length && p.end <= n.start) : [];
       if (!f._prior) {
         const words = directionFromWords(near, nearAfter);
         // "$5.2 billion, up from $4.8 billion": the words give the direction, and the two
@@ -511,6 +540,51 @@
       for (const f of targets) f.tolerance = tolerance;
     }
 
+    // An earlier value is the prior of the current figure it's compared with: the nearest
+    // figure of the same kind (and metric, when both have one) before it in the sentence, else
+    // after it ("From $4B in 2025, revenue rose to $5B"). It stays off the card and out of
+    // "Also caught", and takes its own period: one written right after it, else the words that
+    // made it earlier ("prior year"), else "previous guidance" for guidance. Without a current
+    // figure to belong to, it stays an ordinary figure.
+    const kind = (x) => (x.type === "perShare" ? "money" : x.type);
+    const priorsOwn = []; // periods that belong to earlier values ("2025" in "(2025: €21.02 billion)")
+    for (const p of facts) {
+      if (!p._prior) continue;
+      const fits = (c) => c !== p && !c._prior && (c.role === "level" || c.role === "guidance") && kind(c) === kind(p) && (!p._base || !c._base || p._base === c._base);
+      const current =
+        facts.filter((c) => fits(c) && c._n.start < p._n.start).sort((a, b) => b._n.start - a._n.start)[0] ||
+        facts.find((c) => fits(c) && c._n.start > p._n.start);
+      if (!current) continue;
+      p.priorPeriod = true;
+      p._current = current;
+      if (!current._priorOf) current._priorOf = p;
+      const next = Math.min(text.length, ...groups.map((g) => g.figure.start).filter((st) => st > p._n.start));
+      const own = p._priorLabel.length ? p._priorLabel : periods.filter((q) => q.start >= p._n.end && q.start < next);
+      if (own.length) {
+        p.period = periodOf(bestPeriod(own, p._n));
+        p.periodSource = "clause";
+        priorsOwn.push(...own);
+      } else if (p._priorWhen || current.role === "guidance") {
+        p.period = { text: p._priorWhen || "previous guidance", value: null };
+        p.periodSource = "clause";
+      } else {
+        p.period = null;
+        p.periodSource = null;
+      }
+      // "33.4% versus 32.0% in the prior year": the values say which way it moved.
+      if (!current.direction && !current._dirBlocked && comparable(current, p)) setDirection(current, compare(current.value, p.value), "fromTo");
+    }
+    // No other figure takes an earlier value's own period ("$400 billion this year, up from $230
+    // billion in 2024" isn't 2024; neither is the growth after "(2025: €21.02 billion)").
+    if (priorsOwn.length) {
+      const ownKeys = new Set(priorsOwn.map((q) => periodKey(periodOf(q))));
+      for (const f of facts) {
+        if (f.priorPeriod || !f.period || (f.periodSource !== "clause" && f.periodSource !== "sentence") || !ownKeys.has(periodKey(f.period))) continue;
+        const g = groups.find((x) => x.figure === f._n);
+        if (g) assignPeriod(f, g, f._clause, priorsOwn);
+      }
+    }
+
     // Changes link to the level in the same clause with the same label (not an earlier value
     // it's compared with).
     for (const c of facts) {
@@ -518,7 +592,11 @@
       const level = facts
         .filter((l) => l.role === "level" && !l._prior && l._clause === c._clause && l.label === c.label)
         .sort((a, b) => Math.abs(a._n.start - c._n.start) - Math.abs(b._n.start - c._n.start))[0];
+      // "€25.8 – 26.2 billion (2025: €21.02 billion), up 23% to 25%": the change belongs to the
+      // figure the earlier value is compared with, not to the earlier value.
+      const viaPrior = level ? null : facts.find((l) => l._prior && l._current && l._clause === c._clause && l.label === c.label);
       if (level) link(level, c);
+      else if (viaPrior) link(viaPrior._current, c);
     }
     return facts;
   }
@@ -585,7 +663,8 @@
     // Before the to/at check: "the increase was at 36%" is a change, "rose to $83B" isn't.
     if (CHANGE_BEFORE.test(before)) return true;
     if (/\bto\s+$/i.test(before) || /\bat\s+$/i.test(before)) return false;
-    if (n.type === "percent" || n.type === "basisPoints") return CHANGE_AFTER.test(after) || n.type === "basisPoints";
+    // Basis points and percentage points are almost always a change ("up 180 basis points").
+    if (POINTS_OR_PERCENT.has(n.type)) return CHANGE_AFTER.test(after) || n.type !== "percent";
     return false;
   }
 
@@ -617,6 +696,15 @@
       }
       f.qualifiers = qualifiers;
       f._labelSource = rowHeader ? "row" : "fallback";
+      // A reconciliation table's columns are different measures of the same line ("As
+      // Reported", "Adjustments", "As Adjusted (non-GAAP)"): never on the card, and only in
+      // "Also caught" when the column heading says which measure it is.
+      if (unit.tableReconciliation) {
+        f.reconciliation = true;
+        const measure = header && /[a-z]{3}/i.test(header) && !CHANGE_HEADER.test(header) && !Score.detectNumbers(header).some(isPeriodNumber) ? header : null;
+        if (measure && rowHeader) f.label = `${f.label} (${measure})`;
+        else f._labelSource = "fallback";
+      }
       f._base = base;
       f._loss = Boolean(rowHeader && /\b(?:loss|losses|deficit)\b/i.test(rowHeader));
 
@@ -693,7 +781,24 @@
       .filter((x) => x.p);
     if (levels.length < 2) return null;
     const current = levels.reduce((a, b) => (b.p.key > a.p.key ? b : a));
-    if (levels.filter((x) => x.p.key === current.p.key).length > 1) return null;
+    const currents = levels.filter((x) => x.p.key === current.p.key && x.p.shape === current.p.shape);
+    if (currents.length > 1) {
+      // Several sets of columns side by side ("IFRS: Q3 2026 | Q3 2025 | non-IFRS: Q3 2026 |
+      // Q3 2025"): every earlier column is a comparison, and each current one is compared with
+      // the earlier columns that follow it, up to the next current one.
+      const byPosition = levels.slice().sort((a, b) => a.f._n.start - b.f._n.start);
+      for (const x of levels) if (x.p.shape === current.p.shape && x.p.key < current.p.key) x.f.priorPeriod = true;
+      currents.forEach((c) => {
+        const after = byPosition.slice(byPosition.indexOf(c) + 1);
+        const stop = after.findIndex((x) => currents.includes(x));
+        const group = (stop < 0 ? after : after.slice(0, stop)).filter((x) => x.p.shape === c.p.shape && x.p.key < c.p.key);
+        const prior = group.find((x) => x.p.key === c.p.key - 4) || group.reduce((a, b) => (!a || b.p.key > a.p.key ? b : a), null);
+        if (!prior) return;
+        c.f._priorOf = prior.f;
+        if (comparable(c.f, prior.f)) setDirection(c.f, compare(c.f.value, prior.f.value), "tableColumns");
+      });
+      return null;
+    }
     const same = levels.filter((x) => x !== current && x.p.shape === current.p.shape && x.p.key < current.p.key);
     if (!same.length) return null;
     const yearAgo = same.find((x) => x.p.key === current.p.key - 4);
@@ -713,6 +818,14 @@
   const MONTHS = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/g;
   function columnPeriod(text) {
     const t = collapse(text).toLowerCase();
+    const shape = t.replace(MONTHS, "M").replace(/\d+/g, "#");
+    // A fiscal year across two calendar years ("H1 26/27", "2026/27"): keyed by the year it ends.
+    const split = t.match(/\b(?:h([12])\s?)?(?:fy\s?)?((?:19|20)?\d{2})\/(\d{2})\b/);
+    if (split) {
+      const year = 2000 + Number(split[3]);
+      const half = split[1] ? Number(split[1]) * 2 : null;
+      return { year, q: half, key: year * 4 + (half || 0), shape };
+    }
     let q = null;
     let m = t.match(/\bq([1-4])\b/) || t.match(/\b([1-4])q\b/);
     if (m) q = Number(m[1]);
@@ -722,7 +835,6 @@
     if (!m) return null;
     const year = m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1]);
     // Headers must match apart from their numbers and months: "Q2 FY26" / "Q1 FY26".
-    const shape = t.replace(MONTHS, "M").replace(/\d+/g, "#");
     return { year, q, key: year * 4 + (q || 0), shape };
   }
 
@@ -754,7 +866,7 @@
   // 20%" shows 20%).
   function link(level, change) {
     if (change._linkedTo) return;
-    const percent = (c) => c.type === "percent" || c.type === "basisPoints";
+    const percent = (c) => POINTS_OR_PERCENT.has(c.type);
     if (!level._changeOf || (percent(change) && !percent(level._changeOf))) level._changeOf = change;
     change._linkedTo = level;
   }
@@ -858,9 +970,12 @@
         kept.push(f);
         continue;
       }
+      // (A reconciliation table's copy never wins: the figure's own statement keeps it on the card.)
       const better =
-        CONFIDENCE_RANK[f.confidence] > CONFIDENCE_RANK[twin.confidence] ||
-        (CONFIDENCE_RANK[f.confidence] === CONFIDENCE_RANK[twin.confidence] && f.kind === "sentence" && twin.kind === "row");
+        Boolean(twin.reconciliation) !== Boolean(f.reconciliation)
+          ? Boolean(twin.reconciliation)
+          : CONFIDENCE_RANK[f.confidence] > CONFIDENCE_RANK[twin.confidence] ||
+            (CONFIDENCE_RANK[f.confidence] === CONFIDENCE_RANK[twin.confidence] && f.kind === "sentence" && twin.kind === "row");
       const winner = better ? f : twin;
       const loser = better ? twin : f;
       winner.sources = [...twin.sources, ...f.sources].sort((a, b) => (a.blockIndex ?? 0) - (b.blockIndex ?? 0));
@@ -905,9 +1020,9 @@
     // card's "Also caught" section.
     for (const f of kept) {
       const roleOk = f.role === "level" || f.role === "guidance" || (f.role === "change" && !f.linkedTo);
-      f.showOnCard = f.labelConfidence !== "low" && roleOk && !f.priorPeriod;
+      f.showOnCard = f.labelConfidence !== "low" && roleOk && !f.priorPeriod && !f.reconciliation;
       const prior = resolve(f._priorOf);
-      if (prior && prior.period) f.prior = { display: prior.display, period: prior.period.text, value: prior.value, unit: unitOf(prior) };
+      if (prior) f.prior = { display: prior.display, period: prior.period ? prior.period.text : null, value: prior.value, unit: unitOf(prior) };
       // For exports: the metric on its own ("Operating income", with "non-GAAP" in qualifiers),
       // its unit, the period's end date, and the company (the sentence's own, else the page's).
       // A low-confidence label is a snippet of text, not a metric: no metric then.
@@ -1004,7 +1119,7 @@
       list.forEach((f, j) => rows.push({ fact: f, primary: j === 0, visible: j === 0 && i < VISIBLE_ROWS }));
       for (const f of list.extra) rows.push({ fact: f, primary: false, visible: false });
     });
-    const also = facts.filter((f) => !f.showOnCard && !f.linkedTo && !f.priorPeriod);
+    const also = facts.filter((f) => !f.showOnCard && !f.linkedTo && !f.priorPeriod && !(f.reconciliation && f.labelConfidence === "low"));
     return { rows, also };
   }
 
@@ -1068,6 +1183,8 @@
   const NAME_BEFORE = new RegExp(String.raw`([A-Z][\w&'’.-]*(?:,?\s+${NAME_WORD})*)\s*$`);
   // Words before a name that aren't part of it: "Shares of Coca-Cola", "The Company".
   const NAME_STOP = /^(?:(?:The|Shares|Stock|Company|Today|On|of)\s+)+/;
+  // "Microsoft Corp.", "Tesco PLC", "SAP SE", "Siemens AG", "Unilever N.V.", "BHP Group Ltd".
+  const LEGAL_NAME = /\b((?:[A-Z][\w&'’-]*\s+){0,3}[A-Z][\w&'’-]*),?\s+(Corp\.|Corporation|Inc\.|Incorporated|PLC|plc|SE|AG|N\.V\.|S\.A\.|Ltd\.?|Limited)(?![\w.])/g;
 
   const cleanName = (name) => collapse(name).replace(NAME_STOP, "").replace(/,$/, "");
   const tickerOf = (s) => (s || "").replace(/\.$/, "").toUpperCase();
@@ -1152,7 +1269,31 @@
     const metaTicker = meta.ticker || meta["stock-ticker"] || meta["og:ticker"];
     if (meta.company || metaTicker) return { company: meta.company || null, ticker: metaTicker ? tickerOf(metaTicker) : null, confidence: "medium" };
 
-    // 3. The title: "NVIDIA Announces Financial Results for ...", "Apple reports fourth quarter results".
+    // 3. A company with its ticker in the title: "... :: The Coca-Cola Company (KO)".
+    const titled = tickersIn(title).filter((t) => t.name);
+    const titledTickers = [...new Set(titled.map((t) => t.ticker))];
+    if (titledTickers.length === 1) return { company: titled[0].name, ticker: titledTickers[0], confidence: "medium" };
+
+    // 4. A company name with a legal suffix in the headline or the opening lines: "Microsoft
+    //    Corp. today announced", "Tesco PLC", "SAP SE". Several different ones: blank.
+    const opening = [page.headline || "", ...texts.slice(0, 4)].join(" \n ");
+    const legal = [...new Set([...opening.matchAll(LEGAL_NAME)].map((x) => `${cleanName(x[1])} ${x[2]}`))];
+    if (legal.length === 1) return { company: legal[0], ticker: null, confidence: "medium" };
+    if (legal.length > 1) return blank;
+
+    // 5. An investor-relations site's name: "Recent Results | SAP Investor Relations",
+    //    "FY27 Q1 - Press Releases - Investor Relations - Microsoft".
+    const ir = /\binvestor relations\b/i.test(title) || /^(?:https?:\/\/)?(?:investors?|ir)\./i.test(page.url || "") || /\/(?:investors?|investor-relations)(?:\/|$)/i.test(page.url || "");
+    if (ir) {
+      const site = collapse((meta["og:site_name"] || "").replace(/\binvestor relations\b/i, ""));
+      const parts = title.split(/\s+[|–—-]\s+|\s*::\s*/).map((x) => collapse(x.replace(/\binvestor relations\b/i, ""))).filter(Boolean);
+      const named = /investor relations/i.test(title) ? title.split(/\s+[|–—-]\s+|\s*::\s*/).find((x) => /investor relations/i.test(x)) : null;
+      const fromTitle = named && collapse(named.replace(/\binvestor relations\b/i, "")) ? collapse(named.replace(/\binvestor relations\b/i, "")) : parts[parts.length - 1];
+      const name = site || fromTitle;
+      if (name && name.split(" ").length <= 4) return { company: name, ticker: null, confidence: "low" };
+    }
+
+    // 6. The title: "NVIDIA Announces Financial Results for ...", "Apple reports fourth quarter results".
     const m = title.match(/^(.+?)\s+(?:announces|reports|posts|delivers|releases|reveals)\b.*\b(?:results|earnings)\b/i);
     if (m) return { company: cleanName(m[1]), ticker: null, confidence: "low" };
     return blank;
@@ -1253,7 +1394,7 @@
   // The unit a figure is measured in, for exports.
   function unitOf(f) {
     if (f.type === "perShare" || (f.type === "money" && f.perShare)) return "per_share";
-    return { money: "money", percent: "percent", basisPoints: "basis_points", multiple: "multiple", count: "count" }[f.type] || f.type;
+    return { money: "money", percent: "percent", basisPoints: "basis_points", percentagePoints: "percentage_points", multiple: "multiple", count: "count" }[f.type] || f.type;
   }
 
   const FrogbotFacts = { buildFacts, dominantPeriod, cardRows, metricNear, directionNear, pageIdentity, periodEnds, periodEndFor, isoDate, symbol };

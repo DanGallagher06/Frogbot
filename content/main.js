@@ -404,7 +404,9 @@
     if (debug && rulesSummary) console.log("Frogbot: summary\n" + Summary.plainText(rulesSummary));
     // The rules summary first; the AI summary replaces it if (and when) it passes the checker.
     const summary = ai.phase === "done" && ai.summary ? ai.summary : rulesSummary;
-    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary, ai: { ...ai }, onGetAI: getAI, page });
+    // The card sits above cookie bars and sticky footers; if it moves, the frog moves with it.
+    const onMove = () => perched && Frogbot.placeAt(perchOn(Card.rect()));
+    Card.show(facts, { hidden: true, onClose: () => Frogbot.remove(), onJump: jumpTo, summary, ai: { ...ai }, onGetAI: getAI, page, onMove });
     const perch = perchOn(Card.rect());
     await Frogbot.hopToFixed(perch);
     if (cancelled) return;
@@ -529,8 +531,10 @@
   const page = { ...Facts.pageIdentity({ ...info, texts: blocks.map((b) => b.text) }), publishedDate: info.publishedDate };
   // The rules summary, and the sentences and rows the AI summary is written from (page order).
   const rulesSummary = Summary.rulesSummary(facts);
+  // (Not reconciliation table rows: their figures stay out of the summary.)
   const sources = targets
     .flatMap((t) => t.units)
+    .filter((u) => !u.tableReconciliation)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((u) => u.text);
 

@@ -287,6 +287,31 @@
 
     // ---- Periods (before model names, so "FY26", "Q3" and "H1" aren't junk) ----
     {
+      // A fiscal year written across two calendar years, as UK companies do: "2026/27",
+      // "FY 2025/26", "H1 26/27". One period, never two years. A bare one needs four digits
+      // first ("26/27" alone could be anything); the second year must follow the first. value
+      // is the year it ends in (2026/27 -> 2027, like "FY27").
+      when: /\d\/\d/,
+      re: /\b(?:(?<h>H[12])\s?|(?<fy>FY|[Ff]iscal(?:\s+[Yy]ear)?)\s?)?(?<a>(?:19|20)\d{2}|\d{2})\/(?<b>\d{2})(?![\d/])/g,
+      build: (m, t) => {
+        const { h, fy, a, b } = m.groups;
+        if (!h && !fy && a.length !== 4) return null;
+        if ((Number(a.slice(-2)) + 1) % 100 !== Number(b)) return null;
+        return makeMatch(t, m.index, m.index + m[0].length, "period", { value: yearFrom(b) });
+      },
+    },
+    {
+      // A run of weeks or months to a date: "26 weeks to 24 August 2026", "six months ended
+      // June 30, 2026", "half year ended 29 August 2026". value is the date's year.
+      when: /weeks|months|half[\s-]year/i,
+      re: new RegExp(
+        String.raw`\b(?:(?:\d{1,2}|three|six|nine|twelve)\s+(?:weeks|months)|half[\s-]year)\s+(?:to|ended|ending)\s+` +
+          String.raw`(?:\d{1,2}\s+${MONTH}\s+(?<y1>\d{4})|${MONTH}\s+\d{1,2},?\s+(?<y2>\d{4}))`,
+        "gi"
+      ),
+      build: (m, t) => makeMatch(t, m.index, m.index + m[0].length, "period", { value: Number(m.groups.y1 || m.groups.y2) }),
+    },
+    {
       // Quarter and half ranges: "Q1-Q3 2026", "Q1–Q3", "H1-H2". low/high are the quarter
       // or half numbers; value is the year when given.
       when: /[QH][1-4]\s?[-–—]\s?[QH]/,
@@ -470,11 +495,22 @@
 
     // ---- Percentages, basis points, multiples ----
     {
-      when: /%|per\s?cent|pct|pts?\b|percentage/i,
+      // Percentage points: "1.4 pts", "(0.2) pts", "2 ppts", "3 percentage points", "0.5pp".
+      when: /pts?\b|ppts?\b|pp\b|percentage[\s-]points?/i,
       re: new RegExp(
         String.raw`(?<![\w.,])(?<sign>[+\-−±])?(?:\((?<bn>${NUM})${NUM_END}\)|(?<n1>${NUM})${NUM_END})` +
           String.raw`(?:${DASH}(?<n2>${NUM})${NUM_END})?` +
-          String.raw`\s?(?:%|percentage\s+points?|percent\b|per\s?cent\b|pct\b|pts?\b)`,
+          String.raw`\s?(?:percentage[\s-]points?|ppts?|pts?|pp)\b`,
+        "gi"
+      ),
+      build: (m, t) => makeMatch(t, m.index, m.index + m[0].length, "percentagePoints", amountFields(m.groups)),
+    },
+    {
+      when: /%|per\s?cent|pct/i,
+      re: new RegExp(
+        String.raw`(?<![\w.,])(?<sign>[+\-−±])?(?:\((?<bn>${NUM})${NUM_END}\)|(?<n1>${NUM})${NUM_END})` +
+          String.raw`(?:${DASH}(?<n2>${NUM})${NUM_END})?` +
+          String.raw`\s?(?:%|percent\b|per\s?cent\b|pct\b)`,
         "g"
       ),
       build: (m, t) => makeMatch(t, m.index, m.index + m[0].length, "percent", amountFields(m.groups)),
@@ -560,7 +596,7 @@
   // Post-processing
   // ---------------------------------------------------------------------------
 
-  const RANGEABLE = new Set(["money", "perShare", "percent", "basisPoints", "multiple", "count"]);
+  const RANGEABLE = new Set(["money", "perShare", "percent", "basisPoints", "percentagePoints", "multiple", "count"]);
 
   // "8% to 10%", "$10 billion to $12 billion", "between $505 million and $525 million"
   // become one match. "from X to Y" is a change, not a range, so it's left alone.
@@ -631,8 +667,8 @@
   const COMPARISON =
     /\b(?:versus|vs\.?|compared (?:with|to)|year[\s-](?:over|on)[\s-]year|(?:above|below|ahead of|short of|in line with) (?:expectations|estimates|forecasts|consensus)|consensus|a year (?:ago|earlier)|prior[\s-]year)\b|\bfrom\b[^.;]{1,60}?\bto\b/i;
   // Types that count as "a figure" for change words and the only-counts penalty.
-  const KEY_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "multiple"]);
-  const CHANGEABLE = new Set(["money", "perShare", "percent", "basisPoints", "multiple", "count"]);
+  const KEY_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "percentagePoints", "multiple"]);
+  const CHANGEABLE = new Set(["money", "perShare", "percent", "basisPoints", "percentagePoints", "multiple", "count"]);
   const PERIOD_LIKE = new Set(["period", "year", "date"]);
 
   const wordsOf = (text) => [...text.matchAll(/\S+/g)].map((m) => ({
@@ -675,7 +711,7 @@
     const has = (...types) => real.some((n) => types.includes(n.type));
 
     if (has("money")) add("money", "money");
-    if (has("percent", "basisPoints")) add("percent", "percent");
+    if (has("percent", "basisPoints", "percentagePoints")) add("percent", "percent");
     if (has("perShare")) add("perShare", "per share");
     // The word-by-word check only runs if a change word appears at all (most rows have none).
     if (CHANGE_TEST.test(text)) {
@@ -723,7 +759,7 @@
       const v = Math.abs(n.value);
       if (n.type === "money" || n.type === "perShare") {
         figures.push({ group: "money", digits: v / 10 ** Math.floor(Math.log10(v)) });
-      } else if (n.type === "percent" || n.type === "basisPoints") {
+      } else if (n.type === "percent" || n.type === "basisPoints" || n.type === "percentagePoints") {
         figures.push({ group: n.type, digits: v });
       }
     }
@@ -921,7 +957,7 @@
   // What to highlight (step 9)
   // ---------------------------------------------------------------------------
 
-  const HIGHLIGHT_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "multiple"]);
+  const HIGHLIGHT_TYPES = new Set(["money", "perShare", "percent", "basisPoints", "percentagePoints", "multiple"]);
   const WHEN_TYPES = new Set(["period", "date", "year"]);
   const ATTACH_CHARS = 15; // a period this close to a figure belongs to it ("$12.4B in Q3 2026")
 
@@ -1043,6 +1079,23 @@
       if (how) merged[merged.length - 1] = join(prev, m, how, text);
       else merged.push(m);
     }
+
+    // A bracketed amount right after an amount in another currency is the same figure
+    // converted ("$250 (£189)", "€1.2bn ($1.3bn)"): not a negative, and not a figure of its own.
+    merged.forEach((m, i) => {
+      const prev = merged[i - 1];
+      if (!prev || prev.junk || m.junk || prev.type !== "money" || (m.type !== "money" && m.type !== "perShare")) return;
+      if (!prev.currency || !m.currency || prev.currency === m.currency) return;
+      const gap = text.slice(prev.end, m.start);
+      const bracketed = /^\s*\($/.test(gap) || (/^\s*$/.test(gap) && /^\(/.test(m.raw));
+      const closes = /\)$/.test(m.raw) || /^\s*\)/.test(text.slice(m.end));
+      if (!bracketed || !closes) return;
+      m.junk = true;
+      m.junkReason = "conversion";
+      m.type = "other";
+      m.isNegative = false;
+      if (typeof m.value === "number") m.value = Math.abs(m.value);
+    });
 
     // Per-share figures tied to a phrase just before them ("EPS of $1.42"), and "negative $5m".
     let sentences = null;

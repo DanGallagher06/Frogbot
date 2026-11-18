@@ -987,6 +987,205 @@
       expect: [{ display: "$5.2B", labelConfidence: "high", metric: "Revenue" }],
     },
 
+    // ---- Step 19b: earlier values in prose are the current figure's prior, never a row ----
+    {
+      units: ["Operating margin was 33.4% versus 32.0% in the prior year."],
+      context: Q3,
+      expect: [
+        { display: "33.4%", priorOf: "32% in prior year", direction: "up", card: true },
+        { display: "32%", priorPeriod: true, period: "prior year", card: false },
+      ],
+    },
+    {
+      units: ["Diluted earnings per share were $1.27, ahead of the $1.12 reported a year earlier."],
+      context: Q3,
+      expect: [
+        { label: "Diluted EPS", display: "$1.27", priorOf: "$1.12 in a year earlier", direction: "up" },
+        { display: "$1.12", priorPeriod: true, card: false },
+      ],
+    },
+    {
+      // A raised guidance figure: the old one is its prior, not a second guidance row.
+      units: ["We are raising our FY 2026/27 capital expenditure guidance to c.£1.7bn (from c.£1.6bn)."],
+      expect: [
+        { label: "Guidance: Capital expenditure", display: "£1.7B", role: "guidance", period: "FY 2026/27", priorOf: "£1.6B in previous guidance", card: true },
+        { display: "£1.6B", role: "guidance", priorPeriod: true, card: false },
+      ],
+    },
+    {
+      units: ["Cloud revenue reached €25.9 billion (2025: €21.02 billion) in the third quarter."],
+      expect: [
+        { display: "€25.9B", period: "third quarter", priorOf: "€21.02B in 2025", card: true },
+        { display: "€21.02B", priorPeriod: true, period: "2025" },
+      ],
+    },
+    {
+      // The current figure doesn't take its prior's period.
+      units: ["Capital expenditure will reach $400 billion this year, up from about $230 billion in 2024."],
+      context: Q3,
+      expect: [
+        { label: "Capital expenditure", display: "$400B", period: "Q3 2026", periodSource: "page", direction: "up", priorOf: "$230B in 2024" },
+        { display: "$230B", period: "2024", priorPeriod: true, card: false },
+      ],
+    },
+    {
+      // "compared with" a period: the earlier one is the prior, off the card.
+      units: ["Net income for Q3 2026 was $61.3 million, compared with $47.9 million in Q3 2025."],
+      expect: [
+        { display: "$61.3M", period: "Q3 2026", priorOf: "$47.9M in Q3 2025", card: true },
+        { display: "$47.9M", period: "Q3 2025", priorPeriod: true, card: false },
+      ],
+    },
+    {
+      // No current figure to belong to: an ordinary figure.
+      units: ["Net income was $47.9 million in the prior-year quarter."],
+      context: Q3,
+      expect: [{ display: "$47.9M", priorPeriod: false }],
+    },
+
+    {
+      // Two sets of columns side by side (IFRS and non-IFRS): each current column's prior is
+      // the earlier column after it; every earlier column stays off the card.
+      units: [{ row: ["Cloud revenue", "€6,712m", "€5,301m", "€6,750m", "€5,330m"], headers: [null, "Q3 2026", "Q3 2025", "Q3 2026", "Q3 2025"] }],
+      expect: [
+        { display: "€6.7B", period: "Q3 2026", priorOf: "€5.3B in Q3 2025", direction: "up", card: true },
+        { display: "€5.3B", priorPeriod: true, card: false },
+        { display: "€6.8B", period: "Q3 2026", priorOf: "€5.3B in Q3 2025", card: true },
+        { display: "€5.3B", priorPeriod: true, card: false },
+      ],
+    },
+    {
+      // In an outlook every figure is guidance; the growth range doesn't take last year's "2025".
+      units: ["Cloud revenue is expected to be €25.8 – 26.2 billion (2025: €21.02 billion), up 23% to 25%."],
+      expect: [
+        { display: "€25.8B–€26.2B", role: "guidance", period: null, priorOf: "€21.02B in 2025", card: true },
+        { display: "€21.02B", priorPeriod: true, period: "2025" },
+        { display: "23%–25%", role: "guidance", period: null },
+      ],
+    },
+    {
+      // Outside an outlook, the growth after "(2025: X)" is the current figure's change.
+      units: ["Cloud revenue reached €25.9 billion (2025: €21.02 billion), up 23% in the third quarter."],
+      expect: [
+        { display: "€25.9B", period: "third quarter", change: "23%", direction: "up", card: true },
+        { display: "€21.02B", priorPeriod: true, period: "2025" },
+        { display: "23%", role: "change", linked: true, card: false },
+      ],
+    },
+    {
+      // The same figure in prose and in a reconciliation table: the prose copy stays on the card.
+      units: ["GAAP operating income was $77.5 billion in Q3 FY27.", { row: ["GAAP operating income", "$77,512"], headers: [null, "Q3 FY27"], scale: "million", reconciliation: true }],
+      expect: [{ label: "GAAP operating income", display: "$77.5B", card: true, reconciliation: false, sources: 2 }],
+    },
+    // ---- Step 19b: UK column headers, split fiscal years, change columns ----
+    {
+      units: [{ row: ["Sales", "£33,776m", "£33,051m", "2.0%", "1.6%"], headers: [null, "H1 26/27", "H1 25/26", "Change at actual rates", "Change at constant rates"] }],
+      expect: [
+        { label: "Revenue", display: "£33.8B", period: "H1 26/27", direction: "up", priorOf: "£33.1B in H1 25/26", change: "2%", card: true },
+        { display: "£33.1B", period: "H1 25/26", priorPeriod: true, card: false },
+        { display: "2%", role: "change", linked: true },
+        { display: "1.6%", role: "change", linked: true },
+      ],
+    },
+    {
+      units: ["Group sales for 2026/27 were £70.1 billion."],
+      expect: [{ display: "£70.1B", period: "2026/27" }],
+    },
+    {
+      units: ["Sales for the 26 weeks to 24 August 2026 were £33.8 billion."],
+      expect: [{ display: "£33.8B", period: "26 weeks to 24 August 2026" }],
+    },
+
+    // ---- Step 19b: table scale and reconciliation tables ----
+    {
+      units: [{ row: ["Revenue", "$92,279", "$77,673"], headers: [null, "2026", "2025"], scale: "million" }],
+      expect: [
+        { display: "$92.3B", card: true },
+        { display: "$77.7B", priorPeriod: true },
+      ],
+    },
+    {
+      // Per-share figures in a scaled table aren't scaled.
+      units: [{ row: ["Diluted earnings per share", "$4.92", "$3.72"], headers: [null, "2026", "2025"], scale: "million" }],
+      expect: [{ display: "$4.92", unit: "per_share" }, { display: "$3.72" }],
+    },
+    {
+      // Reconciliation: never on the card; labelled by column only when the column names a measure.
+      units: [{ row: ["Net income", "$36,629", "$(207)", "$36,422"], headers: [null, "As Reported (GAAP)", "Impact from OpenAI", "As Adjusted (non-GAAP)"], scale: "million", reconciliation: true }],
+      expect: [
+        { label: "Net income (As Reported (GAAP))", display: "$36.6B", reconciliation: true, card: false, labelConfidence: "high" },
+        { label: "Net income (Impact from OpenAI)", display: "−$207M", card: false },
+        { label: "Net income (As Adjusted (non-GAAP))", display: "$36.4B", card: false },
+      ],
+    },
+    {
+      units: [{ row: ["Net income", "$36,629", "$27,747"], headers: [null, "2026", "2025"], scale: "million", reconciliation: true }],
+      expect: [
+        { display: "$36.6B", reconciliation: true, card: false, labelConfidence: "low" },
+        { display: "$27.7B", card: false },
+      ],
+    },
+    {
+      // The headline non-GAAP figure stated in prose still counts.
+      units: ["Non-GAAP net income was $36.4 billion in Q1."],
+      expect: [{ label: "Non-GAAP net income", display: "$36.4B", card: true, reconciliation: false }],
+    },
+
+    // ---- Step 19b: currency conversions and percentage points ----
+    {
+      units: ["At most brokers the minimum investment is $250 (£189) for the shares."],
+      context: Q3,
+      expect: [{ display: "$250" }],
+    },
+    {
+      units: [{ row: ["Gross margin", "74.8%", "75.0%", "(0.2) pts", "1.4 pts"], headers: [null, "Q3 FY27", "Q2 FY27", "Q/Q", "Y/Y"] }],
+      context: { negativesShown: true },
+      expect: [
+        { display: "74.8%", period: "Q3 FY27", change: "−0.2 pts" },
+        { display: "75%", priorPeriod: true },
+        { display: "−0.2 pts", role: "change", direction: "down", unit: "percentage_points" },
+        { display: "1.4 pts", role: "change", unit: "percentage_points" },
+      ],
+    },
+    {
+      units: ["Gross margin rose by 1.4 percentage points to 43.5% in Q3 2026."],
+      expect: [
+        { display: "1.4 pts", role: "change", unit: "percentage_points" },
+        { display: "43.5%", change: "1.4 pts", direction: "up" },
+      ],
+    },
+
+    // ---- Step 19b: company names ----
+    {
+      units: ["Revenue was $12.4 billion in Q3 2026."],
+      context: { page: { title: "Coca-Cola Reports Third Quarter 2026 Results :: The Coca-Cola Company (KO)" } },
+      expect: [{ display: "$12.4B", company: "Coca-Cola Company", ticker: "KO" }],
+    },
+    {
+      units: ["Tesco PLC today reported sales of £33.8 billion for H1 26/27."],
+      expect: [{ display: "£33.8B", company: "Tesco PLC", ticker: null }],
+    },
+    {
+      units: ["Revenue was $92.3 billion in Q1."],
+      context: { page: { headline: "Microsoft Corp. announces results", title: "Earnings release" } },
+      expect: [{ display: "$92.3B", company: "Microsoft Corp.", ticker: null }],
+    },
+    {
+      units: ["Cloud revenue grew 27% in the third quarter."],
+      context: { page: { title: "Recent Results | SAP Investor Relations", url: "https://www.sap.com/investors/en/recent-results.html" } },
+      expect: [{ display: "27%", company: "SAP", ticker: null }],
+    },
+    {
+      units: ["Revenue was $92.3 billion in Q1."],
+      context: { page: { title: "FY27 Q1 - Press Releases - Investor Relations - Microsoft" } },
+      expect: [{ display: "$92.3B", company: "Microsoft", ticker: null }],
+    },
+    {
+      // Several companies with legal names: blank.
+      units: ["Siemens AG and Unilever PLC both reported revenue of €20 billion in Q3 2026."],
+      expect: [{ display: "€20B", company: null, ticker: null }],
+    },
+
     // ---- Step 17: period end dates ----
     {
       units: [

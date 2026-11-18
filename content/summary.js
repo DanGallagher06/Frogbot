@@ -123,7 +123,7 @@
     const stated = fact.period && !fact.periodInferred && !SPAN_OF_YEARS.test(fact.period.text);
     const period = stated ? periodPhrase(fact.period.text) : null;
     if (fact.role === "guidance") return { kind: "guidance", fact, period };
-    const growthRate = fact.role === "level" && (fact.type === "percent" || fact.type === "basisPoints") && !RATIO.test(metricText(fact.label));
+    const growthRate = fact.role === "level" && (fact.type === "percent" || fact.type === "basisPoints" || fact.type === "percentagePoints") && !RATIO.test(metricText(fact.label));
     if (growthRate) return VERB[fact.direction] ? { kind: "change", fact, period } : null;
     if (fact.role === "level") return { kind: "level", fact, period };
     if (fact.role === "change" && VERB[fact.direction]) return { kind: "change", fact, period };

@@ -443,6 +443,10 @@
     return -1;
   }
 
+  // Column headings that name a change rather than a period: "Change", "Change at constant
+  // rates", "% change", "Y/Y", "Growth".
+  const CHANGE_HEADING = /\b(?:change|chg|growth|variance|y\/y|q\/q|yoy|qoq|vs\.?)\b|%/i;
+
   function headerRowOf(table, score) {
     if (table.tHead && table.tHead.rows.length) return table.tHead.rows[table.tHead.rows.length - 1];
     const early = [...table.rows].slice(0, 4);
@@ -451,12 +455,59 @@
     const periodRow = early.find((r) => {
       const texts = [...r.cells].map(cellText).filter(Boolean);
       if (texts.length < 2) return false;
-      const periods = texts.filter((t) =>
-        score.detectNumbers(t).some((n) => !n.junk && NOT_FIGURES.has(n.type))
-      ).length;
-      return periods >= Math.ceil(texts.length / 2);
+      const found = texts.map((t) => score.detectNumbers(t).filter((n) => !n.junk));
+      const periods = found.filter((ns) => ns.some((n) => NOT_FIGURES.has(n.type))).length;
+      if (periods >= Math.ceil(texts.length / 2)) return true;
+      // Periods and change columns together: "H1 26/27 | H1 25/26 | Change at actual rates", as
+      // long as the row holds no figures itself.
+      if (!periods || found.some((ns) => ns.some((n) => !NOT_FIGURES.has(n.type) && n.type !== "count"))) return false;
+      const changes = texts.filter((t, i) => !found[i].length && CHANGE_HEADING.test(t)).length;
+      return periods + changes >= Math.ceil(texts.length / 2);
     });
     return periodRow || null;
+  }
+
+  // A table's units from a note: "(In millions, except per share amounts)", "($ in millions)",
+  // "$m", "£m", "€ millions", "in thousands". "thousand" | "million" | "billion" | null.
+  function scaleIn(text) {
+    const t = text || "";
+    let m = t.match(/\bin (thousands|millions|billions)\b/i);
+    if (m) return m[1].toLowerCase().replace(/s$/, "");
+    m = t.match(/(?:^|[\s(])(?:US\$|[$£€]|USD|GBP|EUR)\s?(m|mn|mln|millions?|bn|billions?|k|thousands?|000s)(?![\w])/i);
+    if (!m) return null;
+    const unit = m[1].toLowerCase();
+    return /^(?:m|mn|mln|million)/.test(unit) ? "million" : /^(?:bn|billion)/.test(unit) ? "billion" : "thousand";
+  }
+
+  // The currency a table's units note names: "($ in millions)", "£m", "€ millions".
+  function currencyIn(text) {
+    const m = (text || "").match(/(US\$|[$£€]|\bUSD\b|\bGBP\b|\bEUR\b)\s?(?:in\s+)?(?:m|mn|mln|millions?|bn|billions?|k|thousands?|000s)\b|\((US\$|[$£€])\s?(?:in|,)/i);
+    if (!m) return null;
+    const sym = (m[1] || m[2]).toUpperCase();
+    return { $: "USD", US$: "USD", USD: "USD", "£": "GBP", GBP: "GBP", "€": "EUR", EUR: "EUR" }[sym] || null;
+  }
+
+  // Reconciliation tables (GAAP to non-GAAP and the like): their columns are different
+  // measures of the same line, so their figures stay off the card.
+  const RECONCILIATION_HEADING = /\badjust(?:ment)?s?\b|\bnon-gaap\b|\bexcluding\b|\bimpacts? (?:from|of)\b|\bas adjusted\b/i;
+  const RECONCILIATION_TITLE = /\breconcil/i;
+
+  // The element just before a table (or before a wrapper holding only the table): its line of
+  // text, and whether it's a table of headings only (some pages put the header rows in a table
+  // of their own, directly above the figures).
+  function beforeTable(table, score) {
+    let el = table;
+    while (el.parentElement && !el.previousElementSibling && el.parentElement.children.length === 1) el = el.parentElement;
+    let prev = el.previousElementSibling;
+    while (prev && !collapse(prev.textContent) && prev.previousElementSibling) prev = prev.previousElementSibling;
+    if (!prev) return { line: "", headerTable: null };
+    const inner = prev.tagName === "TABLE" ? prev : prev.querySelectorAll("table").length === 1 && collapse(prev.textContent) === collapse(prev.querySelector("table").textContent) ? prev.querySelector("table") : null;
+    if (inner) {
+      const figures = score.detectNumbers(collapse(inner.textContent), { inTable: true }).some((n) => !n.junk && !NOT_FIGURES.has(n.type) && n.type !== "count");
+      return { line: "", headerTable: figures ? null : inner };
+    }
+    const line = collapse(prev.textContent);
+    return { line: line.length <= 250 ? line : "", headerTable: null };
   }
 
   // Units for scoring, in page order:
@@ -578,17 +629,50 @@
     // table's title (its caption, or one-cell rows above the headers, like Nvidia's "GAAP" /
     // "Non-GAAP") and its units ("($ in millions, except per share data)").
     if (!headerRows.has(table)) {
-      const row = headerRowOf(table, score);
+      const before = beforeTable(table, score);
+      let row = headerRowOf(table, score);
+      let source = table;
+      // No header row of its own, and a table of headings right above it: use that one's.
+      if (!row && before.headerTable) {
+        const ht = before.headerTable;
+        const widest = [...ht.rows].reduce((a, r) => (!a || [...r.cells].map(cellText).filter(Boolean).length > [...a.cells].map(cellText).filter(Boolean).length ? r : a), null);
+        row = headerRowOf(ht, score) || widest;
+        source = ht;
+      }
+      // Rows above the column headings, or (with none) above the first row of figures: one-cell
+      // rows are the table's title ("GAAP", "(In millions)"), wider ones are spanning headings.
+      // Section labels further down ("Adjustments to reconcile net income…") aren't.
+      // (A bare "65,287" counts: some tables put the "$" in a cell of its own.)
+      const figure = (n) => !n.junk && !NOT_FIGURES.has(n.type) && (n.type !== "count" || /,/.test(n.raw) || Math.abs(n.value) >= 1000);
+      const hasFigures = (r) => score.detectNumbers([...r.cells].map(cellText).filter(Boolean).join(" | "), { inTable: true }).some(figure);
       const titleRows = [];
-      for (const r of table.rows) {
-        if (r === row) break;
+      const above = [];
+      for (const r of source.rows) {
+        if (r === row || (source === table && hasFigures(r))) break;
         const texts = [...r.cells].map(cellText).filter(Boolean);
         if (texts.length === 1) titleRows.push(texts[0]);
+        else above.push(...texts);
       }
-      const title = [table.caption ? cellText(table.caption) : "", ...titleRows].filter(Boolean).join(" ");
-      const texts = row ? expandRow(row).map(cellText) : [];
-      const units = `${title} ${texts.join(" ")}`.match(/\bin (thousands|millions|billions)\b/i);
-      headerRows.set(table, { row, texts, title, scale: units ? units[1].toLowerCase().replace(/s$/, "") : null });
+      const title = [source.caption ? cellText(source.caption) : "", ...titleRows].filter(Boolean).join(" ");
+      let texts = row ? expandRow(row).map(cellText) : [];
+      // A borrowed header: each column's headings from every header row as wide as the table
+      // ("2026" over "As Reported (GAAP)"); none if no row lines up with the figures' columns.
+      if (source !== table) {
+        const width = Math.max(...[...table.rows].slice(0, 5).map((r) => expandRow(r).length));
+        // (Rows with one spanning cell are titles, not column headings.)
+        const rows = [...source.rows].filter((r) => expandRow(r).length === width && new Set([...r.cells].map(cellText).filter(Boolean)).size >= 2);
+        texts = rows.length
+          ? Array.from({ length: width }, (_, i) => rows.map((r) => cellText(expandRow(r)[i])).filter(Boolean).filter((t, j, all) => all.indexOf(t) === j).join(" "))
+          : [];
+      }
+      // Column headings (with any spanning headings above them): units, and the words that
+      // make a reconciliation ("Adjustments", "As Adjusted (non-GAAP)"). A borrowed header table
+      // is headings throughout. The title only counts for units and the word "reconciliation".
+      const headingText = source !== table ? [...source.rows].flatMap((r) => [...r.cells].map(cellText)).filter(Boolean).join(" ") : [...texts, ...above].join(" ");
+      const scale = scaleIn(title) || scaleIn(headingText) || scaleIn(before.line) || null;
+      const currency = scale ? currencyIn(title) || currencyIn(headingText) || currencyIn(before.line) : null;
+      const reconciliation = RECONCILIATION_HEADING.test(headingText) || RECONCILIATION_TITLE.test(`${title} ${before.line}`);
+      headerRows.set(table, { row, texts, title, scale, currency, reconciliation });
     }
     const header = headerRows.get(table);
     if (tr === header.row || tr.parentElement.tagName === "THEAD") return null;
@@ -608,7 +692,25 @@
       offset += text.length;
     }
     const rowText = parts.join(" | ");
-    const numbers = score.detectNumbers(rowText, { inTable: true });
+    let numbers = score.detectNumbers(rowText, { inTable: true });
+    // In a table whose note gives a currency and units ("£ millions", "($ in millions)"), a bare
+    // number is an amount in that currency: "1,520" is £1,520 million. (Never a year or a
+    // percentage, and the label column isn't a figure.)
+    // A bare number with a "%" (or "pts") cell right after it is a percentage written across two
+    // cells ("74.8 | %"). Rows of ratios, margins, rates and counts of people or shares stay as
+    // they are.
+    if (header.currency) {
+      const labelEnd = spans.length ? spans[0][1] : 0;
+      const label = spans.length ? spans[0][3] : "";
+      const ratioRow = /\bmargins?\b|%|\bpercent|\bratio\b|\brates?\b|\bper share\b|\bpp\b|\bbasis points\b|\bbps\b|\bheadcount\b|\bemployees\b|\bnumber of\b|\bshares\b|\bdays\b/i.test(label);
+      numbers = numbers.map((n) => {
+        if (n.type !== "count" || n.junk || n.start < labelEnd) return n;
+        const next = rowText.slice(n.end);
+        if (/^\s*\|\s*%/.test(next)) return { ...n, type: "percent" };
+        if (/^\s*\|\s*pts?\b/i.test(next)) return { ...n, type: "percentagePoints" };
+        return ratioRow ? n : { ...n, type: "money", currency: header.currency };
+      });
+    }
     const figureCells = [];
     for (const n of numbers) {
       if (n.junk || NOT_FIGURES.has(n.type)) continue;
@@ -637,6 +739,7 @@
       })),
       tableTitle: header.title,
       tableScale: header.scale, // "thousand" | "million" | "billion" | null
+      tableReconciliation: header.reconciliation, // a GAAP to non-GAAP (or similar) reconciliation
       numbers,
       headers,
       element: target,
@@ -760,7 +863,17 @@
     // Wikipedia's structured data dates the article's creation, not when its figures were
     // written, so a Wikipedia page has no published date.
     const wiki = /(?:^|\.)wikipedia\.org$/.test(location.hostname) || /^MediaWiki\b/.test(meta.generator || "");
-    return { title: document.title || "", jsonld, meta, infobox: infobox(), wiki, publishedDate: wiki ? null : publishedDate(jsonld, meta) };
+    const h1 = document.querySelector("h1");
+    return {
+      title: document.title || "",
+      headline: h1 ? collapse(h1.textContent) : "",
+      url: location.href,
+      jsonld,
+      meta,
+      infobox: infobox(),
+      wiki,
+      publishedDate: wiki ? null : publishedDate(jsonld, meta),
+    };
   }
 
   // A company infobox (Wikipedia's): its name and its "Traded as" row ("Nasdaq: NVDA"), for the

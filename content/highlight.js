@@ -19,6 +19,7 @@
     perShare: "money",
     percent: "percent",
     basisPoints: "percent",
+    percentagePoints: "percent",
     period: "period",
     date: "period",
     year: "period",

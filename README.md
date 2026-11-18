@@ -122,9 +122,11 @@ Everything runs in the page when you click the button, in seven stages:
    paragraph, list, table, heading and quote blocks, skipping navigation, captions, related
    links, collapsed and hidden content. Each sentence and each table row becomes a unit to score.
 2. **Detect** (`content/score.js`). Finds every number in a unit and works out what it is:
-   money, percentage, basis points, per-share amount, multiple, period, date, year or count,
-   with its value, currency and scale. Junk such as phone numbers, addresses, footnote markers
-   and copyright years is flagged and ignored.
+   money, percentage, basis points, percentage points ("1.4 pts", "2 ppts"), per-share amount,
+   multiple, period (including UK fiscal years like "2026/27" and "H1 26/27", and "26 weeks to 24
+   August 2026"), date, year or count, with its value, currency and scale. Junk such as phone
+   numbers, addresses, footnote markers and copyright years is flagged and ignored, and so is a
+   currency conversion in brackets ("$250 (£189)": one figure, not a second, negative one).
 3. **Score** (`content/score.js`). Gives each unit points for money and percentages, change
    words near a number, finance terms, periods and comparisons, and takes points off for
    junk-only units, very long ones and old figures.
@@ -152,7 +154,7 @@ Everything runs in the page when you click the button, in seven stages:
 | Colour | Meaning | Example |
 | --- | --- | --- |
 | Gold | Money and per-share figures | $482.6 million, $1.27 per share |
-| Blue | Percentages and basis points | 14.2%, 180 bps |
+| Blue | Percentages, basis points and percentage points | 14.2%, 180 bps, 1.4 pts |
 | Purple | A period or date attached to a figure | the "Q3 2026" in "$12.4B in Q3 2026" |
 | Grey | Multiples | 2.5x |
 
@@ -166,9 +168,9 @@ so it's tested on its own against hand-written cases:
 
 | Suite | File | Cases |
 | --- | --- | --- |
-| Number detection and sentence splitting | `tests/detect-cases.js` | 212 |
+| Number detection and sentence splitting | `tests/detect-cases.js` | 224 |
 | Scoring and target picking | `tests/score-cases.js` | 92 |
-| Fact records (labels, periods, direction, company, dates) | `tests/facts-cases.js` | 173 |
+| Fact records (labels, periods, direction, company, dates) | `tests/facts-cases.js` | 201 |
 | Summary and number checker | `tests/summary-cases.js` | 56 |
 | Held-out set | `tests/holdout-cases.js` | none yet |
 
@@ -201,8 +203,10 @@ Held-out accuracy: to be measured.
   though it still lands next to its targets.
 - **Start position on those pages.** The same layout switch occasionally moves BBC's first
   paragraph under the frog after it has appeared, so the frog can end up sitting on text.
-- **Cookie banners.** A site's consent overlay can sit above the frog and the card, and take
-  keyboard focus, until it's dismissed.
+- **Cookie banners.** A cookie bar or sticky footer along the bottom of the window no longer
+  covers the card: the card (and the frog on it) sits just above it, and moves back down when
+  it's dismissed. A full-screen consent dialog still sits above the card, and takes keyboard
+  focus, until it's answered.
 
 ## Backlog
 
@@ -250,6 +254,14 @@ Held-out accuracy: to be measured.
   - Step 17: EBITDA, EBIT, net debt, net cash and net margin as their own metrics; the page's
     company and ticker (shown under the card's title) and each figure's own; published and
     period end dates; CSV format version 1, documented in `docs/export-format.md`
+  - Step 19a: the real-world survey tool (`tests/browser/survey.py` and its review workbook)
+    and the PDF notice
+  - Step 19b, part 1 (fixes from the survey): earlier values ("versus X in the prior year",
+    "(from X)", "(2025: X)") kept as the current figure's prior; UK column headers and fiscal
+    years; table units notes ("$ in millions", "£m", the line above a table, a header table
+    above the figures) and reconciliation tables kept off the card; the card lifted above cookie
+    bars; company names from titles, legal names and investor-relations sites; currency
+    conversions; percentage points
   - Step 18 (version 0.3.0): the first-run experience: a welcome page on first install, a
     built-in demo page, the Alt+Shift+F shortcut, a tidier popup, and an options page for the
     developer setting
@@ -410,11 +422,16 @@ the runner skips them, so it reports "No held-out cases yet" until real ones are
 - `test-pages/captions-and-collapsed.html`: a news-style article for checking what extraction
   skips: photo captions and credits, a key-points box, a collapsed AI summary, a closed
   `<details>` and a squashed hidden box, each marked `data-expect="keep"` or `"skip"`.
+- `test-pages/tables.html`: a made-up UK company's interim results for the step 19b fixes: a
+  header row of periods and change columns ("H1 26/27 | H1 25/26 | Change at actual rates"), a
+  units note on the line above a table, a reconciliation table whose headings sit in a table of
+  their own above it, earlier values and raised guidance in prose, a currency conversion,
+  percentage points, a legal company name, and a cookie bar along the bottom of the window.
 
 ### Debug view
 
-Tick **Show what Frogbot reads** in the popup before releasing the frog (the setting is
-remembered). Frogbot then outlines everything it extracted: the main content container in solid
+Tick **Show what Frogbot reads** on the options page (under **Developer**) before releasing
+the frog (the setting is remembered). Frogbot then outlines everything it extracted: the main content container in solid
 red, and every block in a dashed outline coloured by type (paragraph grey, list green, table
 blue, heading purple, quote orange) with an `index type · score` label; chosen targets get a
 solid outline. The page's DevTools console gets tables of the blocks, the numbers found by type
@@ -467,7 +484,7 @@ the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, a
   own metrics, never operating income ("Adjusted EBITDA" is EBITDA, qualified "adjusted"); debt
   (also "total debt", "gross debt"), net debt and net cash are three separate metrics, and so
   are net margin and margin. **metric** is the label's term on its own ("Operating income" for
-  "Non-GAAP operating income"; null for a snippet label), and **unit** is `money`, `percent`, `basis_points`,
+  "Non-GAAP operating income"; null for a snippet label), and **unit** is `money`, `percent`, `basis_points`, `percentage_points`,
   `per_share`, `multiple` or `count`.
 - **role**: `level`, `change` (rose 14.2%, +19.1%, year-over-year), `guidance` or `estimate`
   (analyst or consensus figures). A change is linked to the level with the same label in the
@@ -488,16 +505,36 @@ the figure (`value`, or `low`/`high` for a range, `type`, `currency`, `scale`, a
 - **showOnCard**: true when the label is `high` or `medium` and the fact is a level, guidance,
   or a change with no level to link to, and it isn't an earlier table column.
 - **priorPeriod** and **prior**: in a row with comparable period columns ("Q3 2026" and
-  "Q3 2025"), the earlier columns are `priorPeriod` (off the card), and the current figure's
-  `prior` is the one it's compared with (the same period a year earlier, else the latest
-  before it).
+  "Q3 2025", or UK headers such as "H1 26/27" and "H1 25/26"), the earlier columns are
+  `priorPeriod` (off the card), and the current figure's `prior` is the one it's compared with
+  (the same period a year earlier, else the latest before it). In prose, an earlier value is
+  the prior of the figure it's compared with, never a row of its own: "33.4% versus 32.0% in the
+  prior year", "$5.2 billion, up from $4.8 billion", "€25.9 billion (2025: €21.02 billion)",
+  "$1.27, ahead of the $1.12 reported a year earlier", and a raised guidance figure "to £1.7bn
+  (from £1.6bn)", whose old figure is "previous guidance". The prior keeps its own period (the
+  year in "(2025: …)", or the words "prior year"), and the current figure doesn't take it. With
+  no current figure to belong to, an earlier value stays an ordinary figure.
+- **Tables**: a units note ("(In millions, except per share amounts)", "($ in millions)", "$m",
+  "£m", "€ millions", "in thousands") in the caption, the header rows, the line directly above
+  the table, or a table of headings directly above it scales the table's money (never its
+  per-share figures or percentages); a note naming a currency also makes the table's bare
+  numbers amounts in it ("1,520" under "£ millions" is £1.5B). A header row can mix periods
+  with change columns ("H1 26/27 | H1 25/26 | Change at actual rates"); change columns are
+  changes, never figures of their own. **reconciliation** marks a figure from a reconciliation
+  table (column headings like "Adjustments", "As Adjusted (non-GAAP)", "Excluding", "Impact of",
+  or "reconciliation" in its title): never on the card or in the summary, and in "Also caught"
+  only when its column heading names the measure ("Operating income (Adjusted)"). The headline
+  non-GAAP figure stated in prose still counts.
 - **company** and **ticker**: the company a figure's own sentence names with a ticker
   ("Meta Platforms (META) earnings…"), else the page's. The page's comes from, in order: a
   company infobox's "Traded as" row (Wikipedia's; reading it doesn't change what's scored), exchange
   tickers in the text ("(NASDAQ: NVDA)", "(NYSE: KO)", "Nasdaq: AAPL", "LSE: BP."),
   with the name written before it; structured data (a JSON-LD company with a `tickerSymbol`, or
-  the one organisation a news article is `about`, never its publisher); then a
-  "<Company> reports … results" title. When several companies are equally likely (a round-up of
+  the one organisation a news article is `about`, never its publisher); a company with its
+  ticker in the page title ("… :: The Coca-Cola Company (KO)"); a company name with a legal
+  suffix (Corp., Inc., PLC, SE, AG, N.V., S.A., Ltd) in the headline or opening lines ("Tesco
+  PLC", several different ones: blank); the name of an investor-relations site ("Recent Results
+  | SAP Investor Relations"); then a "<Company> reports … results" title. When several companies are equally likely (a round-up of
   earnings week), both are left blank. Tickers stay junk for number detection.
 - **periodEnd**: the period's last day (`YYYY-MM-DD`) when the page states it: a date in the
   period itself ("Three Months Ended July 27, 2025"), or a "second quarter ended July 27, 2025"
